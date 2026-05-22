@@ -1,0 +1,10 @@
+services:
+  awqatsalah:
+    build: ./awqatsalah
+    container_name: awqatsalah
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_URLS=http://+:8082
+      - ASPNETCORE_ENVIRONMENT=Production
