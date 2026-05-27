@@ -63,6 +63,8 @@ apt-get install -y --no-install-recommends \
     avahi-utils \
     libnss-mdns \
     dbus-user-session \
+    plymouth \
+    plymouth-themes \
     2>/dev/null
 
 systemctl disable hostapd dnsmasq 2>/dev/null || true
@@ -115,7 +117,43 @@ fi
 
 chmod +x "$INSTALL_DIR/scripts/"*.sh
 sed -i "s|CMS_URL=.*|CMS_URL=\"$CMS_URL\"|" "$INSTALL_DIR/scripts/start-kiosk.sh"
+
+# Brand-Ordner (Logo für WiFi-Portal + Plymouth)
+mkdir -p "$INSTALL_DIR/brand"
 chown -R "$KIOSK_USER:$KIOSK_USER" "$INSTALL_DIR"
+
+# ── 3b. Plymouth-Theme installieren ──────────────────────────────────────────
+section "Boot-Theme installieren"
+THEME_SRC="${SCRIPT_DIR:-/tmp/mosque-pi}/plymouth/mosque-signage"
+THEME_DST="/usr/share/plymouth/themes/mosque-signage"
+
+if [ -d "$THEME_SRC" ]; then
+    mkdir -p "$THEME_DST"
+    cp "$THEME_SRC/mosque-signage.plymouth" "$THEME_DST/"
+    cp "$THEME_SRC/mosque-signage.script"   "$THEME_DST/"
+
+    # Logo: eigenes bevorzugen, sonst generieren
+    if [ -f "$INSTALL_DIR/brand/logo.png" ]; then
+        cp "$INSTALL_DIR/brand/logo.png" "$THEME_DST/logo.png"
+        log "Eigenes Logo übernommen"
+    elif [ -f "$THEME_SRC/generate-logo.py" ]; then
+        python3 "$THEME_SRC/generate-logo.py" 2>/dev/null && \
+            cp "$THEME_SRC/logo.png" "$THEME_DST/logo.png" || \
+            warn "Logo-Generierung fehlgeschlagen — fallback auf Text"
+        log "Standard-Logo generiert"
+    fi
+
+    if command -v plymouth-set-default-theme &>/dev/null; then
+        plymouth-set-default-theme mosque-signage 2>/dev/null && \
+            update-initramfs -u -k all 2>/dev/null && \
+            log "Plymouth-Theme aktiv: mosque-signage" || \
+            warn "Plymouth theme setzen fehlgeschlagen (nicht kritisch)"
+    else
+        warn "plymouth-set-default-theme nicht gefunden — Theme kopiert aber nicht aktiv"
+    fi
+else
+    warn "Plymouth-Theme-Quellen nicht gefunden — übersprungen"
+fi
 
 # ── 4. Pi 4 config.txt ───────────────────────────────────────────────────────
 section "Pi 4 Display-Konfiguration"

@@ -120,7 +120,7 @@ log "Gemountet"
 
 # ── Dateien kopieren ──────────────────────────────────────────────────────────
 section "Mosque-Signage Dateien kopieren"
-mkdir -p "$MOUNT_ROOT/opt/mosque/"{scripts,wifi-portal}
+mkdir -p "$MOUNT_ROOT/opt/mosque/"{scripts,wifi-portal,brand}
 
 cp "$SCRIPT_DIR/scripts/wifi-setup.sh"    "$MOUNT_ROOT/opt/mosque/scripts/"
 cp "$SCRIPT_DIR/scripts/start-kiosk.sh"   "$MOUNT_ROOT/opt/mosque/scripts/"
@@ -132,6 +132,27 @@ chmod +x "$MOUNT_ROOT/opt/mosque/scripts/"*.sh
 
 # CMS-URL eintragen
 sed -i "s|CMS_URL=.*|CMS_URL=\"$CMS_URL\"|" "$MOUNT_ROOT/opt/mosque/scripts/start-kiosk.sh"
+
+# Plymouth-Theme kopieren
+THEME_SRC="$SCRIPT_DIR/plymouth/mosque-signage"
+THEME_DST="$MOUNT_ROOT/usr/share/plymouth/themes/mosque-signage"
+mkdir -p "$THEME_DST"
+cp "$THEME_SRC/mosque-signage.plymouth" "$THEME_DST/"
+cp "$THEME_SRC/mosque-signage.script"   "$THEME_DST/"
+cp "$THEME_SRC/generate-logo.py"        "$THEME_DST/"
+# Logo: eigenes bevorzugen, sonst im chroot generieren
+if [ -f "$SCRIPT_DIR/brand/logo.png" ]; then
+    cp "$SCRIPT_DIR/brand/logo.png" "$THEME_DST/logo.png"
+    # auch für WiFi-Portal
+    cp "$SCRIPT_DIR/brand/logo.png" "$MOUNT_ROOT/opt/mosque/brand/logo.png"
+    log "Eigenes Brand-Logo ins Theme + Portal kopiert"
+fi
+
+# brand.json auf FAT32-Partition (editierbar ohne SSH)
+if [ -f "$SCRIPT_DIR/brand/brand.json" ]; then
+    cp "$SCRIPT_DIR/brand/brand.json" "$MOUNT_ROOT/boot/firmware/brand.json"
+    log "brand.json auf /boot/firmware/ kopiert"
+fi
 
 log "Dateien kopiert"
 
@@ -171,6 +192,8 @@ apt-get install -y --no-install-recommends \
     avahi-utils \
     libnss-mdns \
     dbus-user-session \
+    plymouth \
+    plymouth-themes \
     2>/dev/null
 
 apt-get clean
@@ -204,6 +227,19 @@ systemctl enable mosque-kiosk.service
 systemctl enable mosque-wifi-watchdog.service
 systemctl enable mosque-kiosk-restart.timer
 systemctl enable avahi-daemon
+
+# Plymouth Boot-Theme aktivieren
+THEME_DIR="/usr/share/plymouth/themes/mosque-signage"
+if [ -d "$THEME_DIR" ]; then
+    # Logo generieren falls keins vorhanden
+    if [ ! -f "$THEME_DIR/logo.png" ] && [ -f "$THEME_DIR/generate-logo.py" ]; then
+        python3 "$THEME_DIR/generate-logo.py" 2>/dev/null || true
+    fi
+    # Theme als Standard setzen
+    plymouth-set-default-theme mosque-signage 2>/dev/null || true
+    # Kein update-initramfs hier — wird beim ersten Boot via firstrun gemacht
+    echo "[chroot] Plymouth-Theme: mosque-signage"
+fi
 
 # Hardware Watchdog
 echo 'bcm2835-wdt' >> /etc/modules
@@ -262,17 +298,18 @@ hdmi_force_hotplug=1
 hdmi_drive=2
 gpu_mem=128
 arm_boost=1
-disable_splash=1
+disable_splash=0
 [all]
 EOF
 log "config.txt aktualisiert"
 
-# ── firstrun.sh: Geräte-ID beim ersten Boot generieren ───────────────────────
+# ── firstrun.sh: Geräte-ID + Plymouth-initramfs beim ersten Boot ─────────────
 section "First-Boot Script"
 cat > "$MOUNT_ROOT/boot/firmware/firstrun.sh" << 'EOF'
 #!/bin/bash
 # Läuft einmalig beim allerersten Boot
-# Generiert Geräte-ID aus Pi-Seriennummer
+# 1. Geräte-ID aus Pi-Seriennummer generieren
+# 2. Plymouth-initramfs aktualisieren (geht nur auf laufendem System)
 
 DEVICE_CONF="/boot/firmware/device.json"
 
@@ -280,6 +317,11 @@ if [ ! -f "$DEVICE_CONF" ]; then
     SERIAL=$(cat /proc/cpuinfo | grep Serial | awk '{print $3}' | tail -c 9 | tr -d '[:space:]')
     [ -z "$SERIAL" ] && SERIAL=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 12)
     echo "{\"id\": \"pi-$SERIAL\"}" > "$DEVICE_CONF"
+fi
+
+# Plymouth-initramfs aktualisieren damit das Theme wirkt
+if command -v update-initramfs &>/dev/null; then
+    update-initramfs -u -k all 2>/dev/null || true
 fi
 
 # Script selbst löschen (nur einmal ausführen)

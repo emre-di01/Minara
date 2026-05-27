@@ -1,0 +1,68 @@
+// ─────────────────────────────────────────────────────────────────
+// Mosque Signage — Plymouth Boot Theme
+// Dunkler Hintergrund, zentriertes Logo, Fortschrittsbalken
+// ─────────────────────────────────────────────────────────────────
+
+// Hintergrundfarbe (dunkel, fast schwarz)
+Window.SetBackgroundTopColor(0.05, 0.05, 0.07);
+Window.SetBackgroundBottomColor(0.02, 0.02, 0.04);
+
+screen_width  = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+// ── Logo ──────────────────────────────────────────────────────────
+logo_image = Image("logo.png");
+
+logo_w = logo_image.GetWidth();
+logo_h = logo_image.GetHeight();
+
+// Max 320 px breit, proportional skalieren
+max_w = 320;
+if (logo_w > max_w) {
+    scale  = max_w / logo_w;
+    logo_w = Math.Int(logo_w * scale);
+    logo_h = Math.Int(logo_h * scale);
+    logo_image = logo_image.Scale(logo_w, logo_h);
+}
+
+logo_sprite = Sprite(logo_image);
+logo_sprite.SetX(Math.Int((screen_width  - logo_w) / 2));
+logo_sprite.SetY(Math.Int((screen_height - logo_h) / 2) - 60);
+logo_sprite.SetZ(1);
+
+// ── Fortschrittsbalken ────────────────────────────────────────────
+bar_w     = 260;
+bar_h     = 3;
+bar_x     = Math.Int((screen_width - bar_w) / 2);
+bar_y     = Math.Int(screen_height * 0.72);
+bar_color = 0.063;   // dunkles Grau — Hintergrund des Balkens
+
+// Track (grauer Hintergrund)
+track_img = Image.CreateFromColor(bar_w, bar_h, 0.18, 0.18, 0.20, 1.0);
+track_spr = Sprite(track_img);
+track_spr.SetX(bar_x);
+track_spr.SetY(bar_y);
+track_spr.SetZ(2);
+
+// Fill (weißer Balken, wächst)
+fill_spr = Sprite();
+fill_spr.SetX(bar_x);
+fill_spr.SetY(bar_y);
+fill_spr.SetZ(3);
+
+progress = 0;
+
+fun UpdateProgress(time, progress_val) {
+    progress = progress_val;
+    w = Math.Int(bar_w * progress_val);
+    if (w < 1) w = 1;
+    fill_img = Image.CreateFromColor(w, bar_h, 0.90, 0.90, 0.92, 1.0);
+    fill_spr.SetImage(fill_img);
+}
+
+// ── Callbacks ────────────────────────────────────────────────────
+Plymouth.SetBootProgressFunction(UpdateProgress);
+
+Plymouth.SetRootMountedFunction(fun() {
+    UpdateProgress(0, 1.0);
+});

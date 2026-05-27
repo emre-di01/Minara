@@ -5,3 +5,9 @@ dist/
 *.local
 .DS_Store
 .supabase/
+
+# Pi brand assets (proprietär — nicht einchecken)
+pi/brand/logo.png
+pi/brand/brand.json
+pi/plymouth/mosque-signage/logo.png
+pi/output/

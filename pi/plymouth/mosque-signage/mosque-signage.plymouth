@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Mosque Signage
+Description=Mosque Signage Digital Signage Platform
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/mosque-signage
+ScriptFile=/usr/share/plymouth/themes/mosque-signage/mosque-signage.script
