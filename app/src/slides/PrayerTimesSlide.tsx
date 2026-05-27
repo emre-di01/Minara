@@ -37,6 +37,8 @@ function prayerLabel(key: PKey, lang: LangCode, lang2?: LangCode) {
 
 function getNext(times: PrayerTimes, lang: LangCode) {
   const now = new Date()
+  let prevDate: Date | null = null
+
   for (const key of PRAYER_KEYS) {
     const t = times[key as keyof PrayerTimes] as string
     if (!t) continue
@@ -45,12 +47,35 @@ function getNext(times: PrayerTimes, lang: LangCode) {
     target.setHours(h, m, 0, 0)
     if (target > now) {
       const diff = Math.floor((target.getTime() - now.getTime()) / 1000)
+      const prevSecs = prevDate ? Math.floor((now.getTime() - prevDate.getTime()) / 1000) : null
       return {
         key,
         label: PRAYER_NAMES[lang]?.[key] ?? key,
         remaining: `${pad(Math.floor(diff / 3600))}:${pad(Math.floor((diff % 3600) / 60))}:${pad(diff % 60)}`,
         totalSecs: diff,
+        prevSecs,
       }
+    }
+    // Merke letzte vergangene Gebetszeit
+    prevDate = new Date(now)
+    prevDate.setHours(h, m, 0, 0)
+  }
+
+  // Nach Isha: nächste Gebetszeit ist Fajr von morgen (Imsak)
+  const fajrStr = times.fajr as string
+  if (fajrStr) {
+    const [h, m] = fajrStr.split(':').map(Number)
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    tomorrow.setHours(h, m, 0, 0)
+    const diff = Math.floor((tomorrow.getTime() - now.getTime()) / 1000)
+    const prevSecs = prevDate ? Math.floor((now.getTime() - prevDate.getTime()) / 1000) : null
+    return {
+      key: 'fajr' as PKey,
+      label: PRAYER_NAMES[lang]?.['fajr'] ?? 'fajr',
+      remaining: `${pad(Math.floor(diff / 3600))}:${pad(Math.floor((diff % 3600) / 60))}:${pad(diff % 60)}`,
+      totalSecs: diff,
+      prevSecs,
     }
   }
   return null
@@ -562,7 +587,7 @@ function BosphorusTheme({ times, now, date, next, mosqueName, mosqueAddress, bgI
                 <div style={{
                   height: '100%', borderRadius: 999,
                   background: `linear-gradient(to right, rgba(232,160,32,0.3), ${amber})`,
-                  width: `${Math.max(0, Math.min(100, (1 - next.totalSecs / (5 * 3600)) * 100))}%`,
+                  width: `${next.prevSecs != null ? Math.round(next.prevSecs / (next.prevSecs + next.totalSecs) * 100) : 0}%`,
                   transition: 'width 1s linear', boxShadow: `0 0 8px rgba(232,160,32,0.6)`,
                 }} />
               </div>
@@ -586,7 +611,7 @@ function MekkaTheme({ times, now, date, next, mosqueName, mosqueAddress, bgImage
   const goldBright = '#fde68a'
   const goldGlow = 'rgba(212,175,55,0.45)'
   const r = 46, circ = 2 * Math.PI * r
-  const fillPct = next ? Math.max(0, Math.min(1, 1 - next.totalSecs / (5 * 3600))) : 0
+  const fillPct = next && next.prevSecs != null ? next.prevSecs / (next.prevSecs + next.totalSecs) : 0
   const portraitColors: PortraitColors = {
     bg: '#00000a', accent: goldBright, muted: 'rgba(255,255,255,0.56)',
     border: 'rgba(212,175,55,0.13)', rowHi: 'rgba(212,175,55,0.1)', bar: gold, clockColor: 'rgba(253,230,138,0.65)',

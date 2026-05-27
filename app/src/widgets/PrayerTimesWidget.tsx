@@ -29,6 +29,16 @@ function getNext(times: PrayerTimes, lang: LangCode): NextPrayer | null {
       return { key, label: PRAYER_NAMES[lang][key], remaining: `${pad(Math.floor(diff / 3600))}:${pad(Math.floor((diff % 3600) / 60))}:${pad(diff % 60)}` }
     }
   }
+  // Nach Isha: Countdown zum Fajr von morgen
+  const fajrStr = times.fajr as string
+  if (fajrStr) {
+    const [h, m] = fajrStr.split(':').map(Number)
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    tomorrow.setHours(h, m, 0, 0)
+    const diff = Math.floor((tomorrow.getTime() - now.getTime()) / 1000)
+    return { key: 'fajr', label: PRAYER_NAMES[lang]['fajr'], remaining: `${pad(Math.floor(diff / 3600))}:${pad(Math.floor((diff % 3600) / 60))}:${pad(diff % 60)}` }
+  }
   return null
 }
 
@@ -49,7 +59,20 @@ export default function PrayerTimesWidget({ cityId, theme, config }: Props) {
 
   useEffect(() => {
     if (!cityId) return
-    getDailyPrayerTimes(cityId).then(setTimes).catch(console.error)
+
+    function fetchTimes() {
+      getDailyPrayerTimes(cityId).then(setTimes).catch(console.error)
+    }
+    fetchTimes()
+
+    // Täglich um Mitternacht neue Gebetszeiten holen
+    function scheduleMidnight(): ReturnType<typeof setTimeout> {
+      const n = new Date()
+      const ms = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1).getTime() - n.getTime()
+      return setTimeout(() => { fetchTimes(); timer = scheduleMidnight() }, ms)
+    }
+    let timer = scheduleMidnight()
+    return () => clearTimeout(timer)
   }, [cityId])
 
   const tick = useCallback(() => {
