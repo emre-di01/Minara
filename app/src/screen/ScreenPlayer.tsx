@@ -166,6 +166,14 @@ export default function ScreenPlayer({ hardwareId }: Props) {
   }
 
   if (!playlist) {
+    // playlist_id ist gesetzt aber Fetch läuft noch → Spinner statt NoPlaylistScreen
+    if (screen.playlist_id || playlistIdRef.current) {
+      return (
+        <div className="h-screen w-screen bg-gray-950 flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+        </div>
+      )
+    }
     return <NoPlaylistScreen hardwareId={hardwareId} />
   }
 
@@ -199,7 +207,10 @@ function ScreenContent({
 }) {
   const azanConfig = screen.azan_config ?? null
   const [prayerTimes, setPrayerTimes] = useState<PrayerTimes | null>(null)
-  const [activeAzan, setActiveAzan] = useState<AzanPrayer | null>(null)
+  const [activeAzan, setActiveAzan] = useState<AzanPrayer | null>(() => {
+    const p = new URLSearchParams(window.location.search).get('test_azan')
+    return (p && ['fajr','dhuhr','asr','maghrib','isha'].includes(p)) ? p as AzanPrayer : null
+  })
   const lastAzanRef = useRef<string | null>(null) // "fajr-2024-05-27" — verhindert Doppel-Trigger
 
   // ── Gebetszeiten laden ───────────────────────────────────────────────────────
@@ -223,6 +234,29 @@ function ScreenContent({
     let timer = scheduleMidnight()
     return () => clearTimeout(timer)
   }, [azanConfig?.enabled, prayerSource, cityId])
+
+  // ── Ezan Test-Trigger via device_commands ────────────────────────────────────
+  useEffect(() => {
+    const ch = supabase
+      .channel(`azan-cmd:${screen.hardware_id}`)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'device_commands',
+        filter: `hardware_id=eq.${screen.hardware_id}`,
+      }, ({ new: cmd }) => {
+        if (cmd.command === 'trigger_azan') {
+          const prayer = (cmd.payload as { prayer?: string })?.prayer
+          if (prayer && AZAN_PRAYERS.includes(prayer as AzanPrayer)) {
+            setActiveAzan(prayer as AzanPrayer)
+          }
+          supabase.from('device_commands')
+            .update({ executed_at: new Date().toISOString(), status: 'done' })
+            .eq('id', cmd.id)
+            .then(() => {})
+        }
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [screen.hardware_id])
 
   // ── Ezan-Trigger: Hybrid-Ansatz ─────────────────────────────────────────────
   // 1. setTimeout schläft bis 30s vor dem Gebet     → null CPU-Last dazwischen
@@ -308,7 +342,7 @@ function ScreenContent({
       {activeAzan && (
         <AzanOverlay
           prayer={activeAzan}
-          config={azanConfig!}
+          config={azanConfig ?? { enabled: true, overlay: true, prayers: {} }}
           profile={profile}
           onEnd={() => setActiveAzan(null)}
         />
@@ -344,29 +378,62 @@ function AzanOverlay({
   onEnd: () => void
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const blobUrlRef = useRef<string | null>(null)
   const audioUrl = config.prayers?.[prayer]?.url ?? null
   const mosqueName = profile?.name ?? ''
+  const [audioBlocked, setAudioBlocked] = useState(false)
 
-  // Audio abspielen
+  // Fallback: immer nach 10 Minuten schließen
+  useEffect(() => {
+    const t = setTimeout(onEnd, 10 * 60 * 1000)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Audio laden + abspielen — Blob-URL wegen Range-Request-Problem des Reverse Proxy
   useEffect(() => {
     if (!audioUrl) return
-    const audio = new Audio(audioUrl)
-    audioRef.current = audio
-    audio.play().catch(console.error)
-    audio.addEventListener('ended', onEnd)
+    let cancelled = false
+    fetch(audioUrl, { mode: 'cors', cache: 'no-store' })
+      .then(r => r.blob())
+      .then(blob => {
+        if (cancelled) return
+        const blobUrl = URL.createObjectURL(blob)
+        blobUrlRef.current = blobUrl
+        const audio = new Audio(blobUrl)
+        audioRef.current = audio
+        audio.addEventListener('ended', onEnd)
+        audio.play().catch(err => {
+          // Browser blockiert Autoplay ohne Nutzer-Geste → Tap-Hinweis anzeigen
+          if ((err as DOMException).name === 'NotAllowedError') {
+            setAudioBlocked(true)
+          } else {
+            console.warn('Azan audio error:', err)
+          }
+        })
+      })
+      .catch(err => console.warn('Azan audio fetch failed:', err))
     return () => {
-      audio.removeEventListener('ended', onEnd)
-      audio.pause()
+      cancelled = true
+      audioRef.current?.removeEventListener('ended', onEnd)
+      audioRef.current?.pause()
       audioRef.current = null
+      if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null }
     }
   }, [audioUrl])
 
-  // Kein Audio + Overlay: nach 10 Minuten automatisch schließen
-  useEffect(() => {
-    if (audioUrl) return
-    const t = setTimeout(onEnd, 10 * 60 * 1000)
-    return () => clearTimeout(t)
-  }, [audioUrl])
+  // Nutzer tippt → Autoplay-Sperre aufheben und Audio abspielen
+  function handleUnlock() {
+    if (!audioBlocked || !blobUrlRef.current) return
+    const audio = new Audio(blobUrlRef.current)
+    audioRef.current?.removeEventListener('ended', onEnd)
+    audioRef.current?.pause()
+    audio.addEventListener('ended', onEnd)
+    audioRef.current = audio
+    audio.play()
+      .then(() => setAudioBlocked(false))
+      .catch(err => console.warn('Azan unlock failed:', err))
+  }
 
   if (!config.overlay) return null
 
@@ -377,13 +444,16 @@ function AzanOverlay({
         zIndex: 100,
         background: 'radial-gradient(ellipse at 50% 40%, #0d1a0f 0%, #050d07 60%, #000 100%)',
         animation: 'az-fadein 1.2s ease forwards',
+        cursor: audioBlocked ? 'pointer' : 'default',
       }}
+      onClick={handleUnlock}
     >
       <style>{`
         @keyframes az-fadein  { from { opacity: 0 } to { opacity: 1 } }
         @keyframes az-pulse   { 0%,100% { opacity: 0.6; transform: scale(1) } 50% { opacity: 1; transform: scale(1.04) } }
         @keyframes az-rise    { from { opacity: 0; transform: translateY(24px) } to { opacity: 1; transform: translateY(0) } }
         @keyframes az-shimmer { 0%,100% { opacity: 0.3 } 50% { opacity: 0.7 } }
+        @keyframes az-tapfade { 0%,100% { opacity: 0.4 } 50% { opacity: 0.85 } }
       `}</style>
 
       {/* Decorative stars */}
@@ -479,16 +549,33 @@ function AzanOverlay({
         </div>
       )}
 
-      {/* Close button (nur wenn kein Audio — dann manuell schließen möglich) */}
-      {!audioUrl && (
-        <button
-          onClick={onEnd}
-          className="absolute bottom-8 right-8 text-white/20 hover:text-white/50 text-sm transition"
-          style={{ letterSpacing: '0.1em' }}
-        >
-          ✕
-        </button>
+      {/* Tap-to-play Hinweis — nur wenn Browser Autoplay blockiert hat */}
+      {audioBlocked && (
+        <div style={{
+          position: 'absolute',
+          bottom: '10vh',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          color: 'rgba(201,146,26,0.7)',
+          fontSize: 'clamp(0.75rem, 1.8vw, 1rem)',
+          letterSpacing: '0.15em',
+          animation: 'az-tapfade 1.8s ease-in-out infinite',
+          pointerEvents: 'none',
+        }}>
+          <span style={{ fontSize: '1.2em' }}>🔊</span>
+          Tippen zum Abspielen
+        </div>
       )}
+
+      {/* Close button */}
+      <button
+        onClick={e => { e.stopPropagation(); onEnd() }}
+        className="absolute bottom-8 right-8 text-white/20 hover:text-white/50 text-sm transition"
+        style={{ letterSpacing: '0.1em' }}
+      >
+        ✕
+      </button>
     </div>
   )
 }

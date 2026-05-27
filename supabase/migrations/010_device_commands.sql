@@ -25,3 +25,5 @@ CREATE POLICY "owner insert commands" ON device_commands
         AND screens.owner_id = auth.uid()
     )
   );
+
+ALTER PUBLICATION supabase_realtime ADD TABLE device_commands;

@@ -127,6 +127,8 @@ export type AzanPrayer = 'fajr' | 'dhuhr' | 'asr' | 'maghrib' | 'isha'
 export interface AzanPrayerConfig {
   /** Public URL zur Audio-Datei im Supabase Storage (null = kein eigener Ton) */
   url: string | null
+  /** Originaler Dateiname für die Anzeige im UI */
+  name?: string
 }
 
 export interface AzanConfig {
@@ -141,7 +143,7 @@ export interface AzanConfig {
 export interface DeviceCommand {
   id: string
   hardware_id: string
-  command: 'restart_kiosk' | 'reboot' | 'clear_cache' | 'update_scripts' | 'set_orientation'
+  command: 'restart_kiosk' | 'reboot' | 'clear_cache' | 'update_scripts' | 'set_orientation' | 'trigger_azan'
   payload: Record<string, unknown>
   created_at: string
   executed_at: string | null

@@ -162,6 +162,7 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
   const [showCityPicker, setShowCityPicker] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
   const [showAzan, setShowAzan] = useState(false)
+  const [showAzanTest, setShowAzanTest] = useState(false)
   const [showRemote, setShowRemote] = useState(false)
   const [cmdSending, setCmdSending] = useState<string | null>(null)
   const [lastCmd, setLastCmd] = useState<{ text: string, ok: boolean } | null>(null)
@@ -294,11 +295,39 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
               <span className="ml-1.5 text-emerald-500">●</span>
             )}
           </span>
-          <button onClick={() => setShowAzan(s => !s)}
-            className="text-xs text-emerald-400 hover:text-emerald-300 transition">
-            {showAzan ? t.sc.azanClose : t.sc.azan}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setShowAzanTest(s => !s); setShowAzan(false) }}
+              className="text-xs text-yellow-500 hover:text-yellow-400 transition"
+              title="Ezan testen"
+            >
+              ▶ Test
+            </button>
+            <button onClick={() => { setShowAzan(s => !s); setShowAzanTest(false) }}
+              className="text-xs text-emerald-400 hover:text-emerald-300 transition">
+              {showAzan ? t.sc.azanClose : t.sc.azan}
+            </button>
+          </div>
         </div>
+
+        {showAzanTest && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {(['fajr','dhuhr','asr','maghrib','isha'] as const).map(prayer => (
+              <button
+                key={prayer}
+                onClick={() => {
+                  sendCommand('trigger_azan', { prayer })
+                  setShowAzanTest(false)
+                }}
+                disabled={cmdSending === 'trigger_azan'}
+                className="bg-yellow-900/40 hover:bg-yellow-800/60 disabled:opacity-40 text-yellow-300 text-xs px-2 py-1 rounded transition capitalize"
+              >
+                {prayer}
+              </button>
+            ))}
+          </div>
+        )}
+
         {showAzan && (
           <AzanEditor
             screenId={screen.id}
@@ -430,8 +459,8 @@ const AZAN_PRAYERS: { key: AzanPrayer; labelKey: keyof ReturnType<typeof useCmsT
 
 const AUDIO_EXTS = ['mp3', 'aac', 'ogg', 'wav', 'm4a', 'opus', 'flac']
 
-function AzanEditor({ screenId, config: initial, onSave }: {
-  screenId: string
+function AzanEditor({ config: initial, onSave }: {
+  screenId?: string
   config: AzanConfig | null
   onSave: (cfg: AzanConfig) => void
 }) {
@@ -443,31 +472,54 @@ function AzanEditor({ screenId, config: initial, onSave }: {
     prayers: {},
   })
   const [uploading, setUploading]   = useState<AzanPrayer | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [saving, setSaving]         = useState(false)
   const [playing, setPlaying]       = useState<AzanPrayer | null>(null)  // Audio-Vorschau
+  const [playError, setPlayError]   = useState<string | null>(null)
   const [pickerFor, setPickerFor]   = useState<AzanPrayer | null>(null)  // Mediathek-Picker
   const [mediaFiles, setMediaFiles] = useState<{ name: string; url: string }[]>([])
   const [loadingMedia, setLoadingMedia] = useState(false)
   const fileRefs   = useRef<Partial<Record<AzanPrayer, HTMLInputElement | null>>>({})
   const audioRef   = useRef<HTMLAudioElement | null>(null)
 
+  const blobUrlRef = useRef<string | null>(null)
+
   // ── Audio-Vorschau ─────────────────────────────────────────────────────────
-  function togglePreview(prayer: AzanPrayer, url: string) {
+  async function togglePreview(prayer: AzanPrayer, url: string) {
+    setPlayError(null)
     if (audioRef.current) {
       audioRef.current.pause()
       audioRef.current = null
     }
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current)
+      blobUrlRef.current = null
+    }
     if (playing === prayer) { setPlaying(null); return }
 
-    const audio = new Audio(url)
-    audioRef.current = audio
-    audio.play().catch(console.error)
-    audio.onended = () => setPlaying(null)
-    setPlaying(prayer)
+    try {
+      // Blob-URL umgehen Range-Request-Problem des Reverse Proxy
+      const resp = await fetch(url, { mode: 'cors', cache: 'no-store' })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const blob = await resp.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      blobUrlRef.current = blobUrl
+      const audio = new Audio(blobUrl)
+      audioRef.current = audio
+      await audio.play()
+      setPlaying(prayer)
+      audio.onended = () => setPlaying(null)
+    } catch (e) {
+      setPlayError(`Wiedergabe fehlgeschlagen: ${(e as Error).message}`)
+      setPlaying(null)
+    }
   }
 
   // Cleanup bei Unmount
-  useEffect(() => () => { audioRef.current?.pause() }, [])
+  useEffect(() => () => {
+    audioRef.current?.pause()
+    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
+  }, [])
 
   // ── Mediathek laden ────────────────────────────────────────────────────────
   async function openMediaPicker(prayer: AzanPrayer) {
@@ -475,14 +527,16 @@ function AzanEditor({ screenId, config: initial, onSave }: {
     if (mediaFiles.length > 0) return  // schon geladen
     setLoadingMedia(true)
     try {
-      // Haupt-Bucket + azan/-Ordner durchsuchen
-      const [{ data: root }, { data: azanDir }] = await Promise.all([
-        supabase.storage.from('media').list('', { limit: 500 }),
-        supabase.storage.from('media').list('azan', { limit: 200 }),
+      // backgrounds/ (MediaLibrary-Uploads) + azan/{userId}/ (direkte Ezan-Uploads)
+      const userId = user?.id ?? ''
+      const [{ data: bgFiles }, { data: azanFiles }] = await Promise.all([
+        supabase.storage.from('media').list('backgrounds', { limit: 500 }),
+        supabase.storage.from('media').list(`azan/${userId}`, { limit: 200 }),
       ])
-      const rootFiles = (root ?? []).filter(f => !f.id?.includes('/'))  // nur Root-Level
-      const azanFiles = (azanDir ?? []).map(f => ({ ...f, name: `azan/${f.name}` }))
-      const all = [...rootFiles, ...azanFiles]
+      const all = [
+        ...(bgFiles ?? []).map(f => ({ ...f, name: `backgrounds/${f.name}` })),
+        ...(azanFiles ?? []).map(f => ({ ...f, name: `azan/${userId}/${f.name}` })),
+      ]
       const audioFiles = all.filter(f => {
         const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
         return AUDIO_EXTS.includes(ext)
@@ -498,9 +552,9 @@ function AzanEditor({ screenId, config: initial, onSave }: {
     }
   }
 
-  function selectFromMedia(url: string) {
+  function selectFromMedia(url: string, name: string) {
     if (!pickerFor) return
-    setCfg(c => ({ ...c, prayers: { ...c.prayers, [pickerFor]: { url } } }))
+    setCfg(c => ({ ...c, prayers: { ...c.prayers, [pickerFor]: { url, name } } }))
     setPickerFor(null)
   }
 
@@ -508,19 +562,29 @@ function AzanEditor({ screenId, config: initial, onSave }: {
   async function uploadAudio(prayer: AzanPrayer, file: File) {
     if (!user) return
     setUploading(prayer)
+    setUploadError(null)
     try {
+      // Alte Datei löschen (Pfad aus gespeicherter URL extrahieren)
+      const oldUrl = cfg.prayers?.[prayer]?.url
+      if (oldUrl) {
+        const marker = '/object/public/media/'
+        const idx = oldUrl.indexOf(marker)
+        if (idx !== -1) await supabase.storage.from('media').remove([oldUrl.slice(idx + marker.length)])
+      }
+      // Dateinamen sanitieren: Leerzeichen + Sonderzeichen → Unterstrich
       const ext = file.name.split('.').pop() ?? 'mp3'
-      const path = `azan/${user.id}/${screenId}-${prayer}.${ext}`
-      await supabase.storage.from('media').remove([path])
+      const baseName = file.name.slice(0, -(ext.length + 1)).replace(/[^a-zA-Z0-9._-]/g, '_')
+      const safeName = `${baseName}.${ext}`
+      const path = `azan/${user.id}/${safeName}`
       const { error } = await supabase.storage.from('media').upload(path, file, {
         cacheControl: '3600', upsert: true, contentType: file.type || 'audio/mpeg',
       })
       if (error) throw error
       const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(path)
-      setCfg(c => ({ ...c, prayers: { ...c.prayers, [prayer]: { url: publicUrl } } }))
-      setMediaFiles([])  // Mediathek-Cache invalidieren
+      setCfg(c => ({ ...c, prayers: { ...c.prayers, [prayer]: { url: publicUrl, name: file.name } } }))
+      setMediaFiles([])
     } catch (e) {
-      console.error('Azan upload error:', e)
+      setUploadError(`Upload fehlgeschlagen: ${(e as Error).message}`)
     } finally {
       setUploading(null)
     }
@@ -564,7 +628,7 @@ function AzanEditor({ screenId, config: initial, onSave }: {
           const isUploading = uploading === key
           const isPlaying   = playing === key
           const fileName    = audioUrl
-            ? decodeURIComponent(audioUrl.split('/').pop()?.split('?')[0] ?? '')
+            ? (cfg.prayers?.[key]?.name ?? decodeURIComponent(audioUrl.split('/').pop()?.split('?')[0] ?? ''))
             : null
 
           return (
@@ -599,7 +663,7 @@ function AzanEditor({ screenId, config: initial, onSave }: {
                 </div>
 
                 {/* Upload */}
-                <input type="file" accept="audio/*" className="hidden"
+                <input type="file" accept="audio/*,.mp3,.aac,.ogg,.wav,.m4a,.opus,.flac" className="hidden"
                   ref={el => { fileRefs.current[key] = el }}
                   onChange={e => { const f = e.target.files?.[0]; if (f) uploadAudio(key, f); e.target.value = '' }}
                 />
@@ -631,7 +695,7 @@ function AzanEditor({ screenId, config: initial, onSave }: {
                   ) : (
                     <div className="max-h-36 overflow-y-auto">
                       {mediaFiles.map(f => (
-                        <button key={f.url} onClick={() => selectFromMedia(f.url)}
+                        <button key={f.url} onClick={() => selectFromMedia(f.url, f.name.split('/').pop() ?? f.name)}
                           className="w-full text-left px-2 py-1.5 text-xs text-gray-300 hover:bg-white/5 hover:text-white transition truncate block">
                           🎵 {f.name.split('/').pop()}
                         </button>
@@ -644,6 +708,9 @@ function AzanEditor({ screenId, config: initial, onSave }: {
           )
         })}
       </div>
+
+      {uploadError && <p className="text-red-400 text-xs px-1">{uploadError}</p>}
+      {playError && <p className="text-red-400 text-xs px-1">{playError}</p>}
 
       <button onClick={handleSave} disabled={saving}
         className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
