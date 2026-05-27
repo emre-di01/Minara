@@ -17,7 +17,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation()
   const t = useCmsT()
 
-  const mosqueName = profile?.name || 'Signage CMS'
+  const mosqueName = profile?.name || 'Minara'
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col md:flex-row">

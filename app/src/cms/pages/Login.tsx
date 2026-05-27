@@ -43,7 +43,7 @@ export default function Login() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🕌</div>
-          <h1 className="text-white text-2xl font-bold">Moschee Signage</h1>
+          <h1 className="text-white text-2xl font-bold">Minara</h1>
           <p className="text-gray-500 text-sm mt-1">Digital Signage für Moscheen</p>
         </div>
 
