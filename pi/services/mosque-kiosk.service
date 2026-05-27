@@ -1,0 +1,17 @@
+[Unit]
+Description=Mosque Signage Kiosk
+After=network-online.target graphical.target
+Wants=network-online.target
+
+[Service]
+User=kiosk
+Group=kiosk
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/kiosk/.Xauthority
+ExecStartPre=/bin/sleep 3
+ExecStart=/opt/mosque/scripts/start-kiosk.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

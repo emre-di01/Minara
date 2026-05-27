@@ -1,0 +1,15 @@
+[Unit]
+Description=Mosque Signage WiFi Setup
+After=local-fs.target
+Before=network.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/mosque/scripts/wifi-setup.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
