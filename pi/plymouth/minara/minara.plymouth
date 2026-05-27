@@ -1,8 +1,8 @@
 [Plymouth Theme]
-Name=Mosque Signage
-Description=Mosque Signage Digital Signage Platform
+Name=Minara
+Description=Minara Digital Signage Platform
 ModuleName=script
 
 [script]
-ImageDir=/usr/share/plymouth/themes/mosque-signage
-ScriptFile=/usr/share/plymouth/themes/mosque-signage/mosque-signage.script
+ImageDir=/usr/share/plymouth/themes/minara
+ScriptFile=/usr/share/plymouth/themes/minara/minara.script

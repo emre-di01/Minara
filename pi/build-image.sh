@@ -287,7 +287,8 @@ if [ -d "$THEME_DIR" ]; then
     fi
     # Theme als Standard setzen
     plymouth-set-default-theme minara 2>/dev/null || true
-    # Kein update-initramfs hier — wird beim ersten Boot via firstrun gemacht
+    # Initramfs jetzt aktualisieren — Plymouth muss das Theme beim ersten Boot kennen
+    update-initramfs -u -k all 2>/dev/null || true
     echo "[chroot] Plymouth-Theme: minara"
 fi
 
@@ -353,14 +354,16 @@ disable_splash=0
 EOF
 log "config.txt aktualisiert"
 
-# ── firstrun.sh: Geräte-ID + Plymouth-initramfs beim ersten Boot ─────────────
+# ── firstrun.sh: Geräte-ID beim ersten Boot ──────────────────────────────────
+# WICHTIG: kein systemd.unit=kernel-command-line.target mehr — Plymouth-quit.service
+# gehört zu multi-user.target und wird sonst nie ausgelöst → Plymouth hängt.
+# Stattdessen: oneshot-Service der sich nach Ausführung selbst deaktiviert.
 section "First-Boot Script"
 cat > "$MOUNT_ROOT/boot/firmware/firstrun.sh" << 'EOF'
 #!/bin/bash
-# Läuft einmalig beim allerersten Boot
+# Läuft einmalig beim allerersten Boot (via minara-firstrun.service)
 # 1. Pi OS First-Boot-Wizard sicher deaktivieren
 # 2. Geräte-ID aus Pi-Seriennummer generieren
-# 3. Plymouth-initramfs aktualisieren (geht nur auf laufendem System)
 
 # Sicherheitsnetz: userconfig nochmal deaktivieren (Bookworm-Quirk)
 systemctl disable userconfig 2>/dev/null || true
@@ -370,31 +373,48 @@ rm -f /etc/xdg/autostart/piwiz.desktop 2>/dev/null || true
 DEVICE_CONF="/boot/firmware/device.json"
 
 if [ ! -f "$DEVICE_CONF" ]; then
-    SERIAL=$(cat /proc/cpuinfo | grep Serial | awk '{print $3}' | tail -c 9 | tr -d '[:space:]')
-    [ -z "$SERIAL" ] && SERIAL=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 12)
+    SERIAL=$(grep Serial /proc/cpuinfo | awk '{print $3}' | tail -c 9 | tr -d '[:space:]')
+    [ -z "$SERIAL" ] && SERIAL=$(tr -d '-' < /proc/sys/kernel/random/uuid | head -c 12)
     echo "{\"id\": \"pi-$SERIAL\"}" > "$DEVICE_CONF"
 fi
 
-# Plymouth-initramfs aktualisieren damit das Theme wirkt
-if command -v update-initramfs &>/dev/null; then
-    update-initramfs -u -k all 2>/dev/null || true
-fi
-
-# Script selbst löschen (nur einmal ausführen)
-rm -f /boot/firmware/firstrun.sh
-sed -i 's| systemd.run.*||g' /boot/firmware/cmdline.txt
+# Service nach einmaligem Ausführen deaktivieren
+systemctl disable minara-firstrun.service 2>/dev/null || true
 EOF
 chmod +x "$MOUNT_ROOT/boot/firmware/firstrun.sh"
 
-# firstrun.sh + consoleblank=0 in cmdline.txt eintragen
+# Systemd-Service für firstrun — läuft NACH multi-user.target, Plymouth terminiert normal
+cat > "$MOUNT_ROOT/etc/systemd/system/minara-firstrun.service" << 'EOF'
+[Unit]
+Description=Minara First-Boot Setup
+After=multi-user.target
+ConditionPathExists=/boot/firmware/firstrun.sh
+
+[Service]
+Type=oneshot
+ExecStart=/boot/firmware/firstrun.sh
+RemainAfterExit=no
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Service im chroot aktivieren
+chroot "$MOUNT_ROOT" systemctl enable minara-firstrun.service 2>/dev/null || true
+
+# cmdline.txt: consoleblank=0 + quiet splash (Plymouth grafischer Modus)
 CMDLINE="$MOUNT_ROOT/boot/firmware/cmdline.txt"
-if ! grep -q "firstrun" "$CMDLINE"; then
-    sed -i 's/$/ systemd.run=\/boot\/firmware\/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target/' "$CMDLINE"
-fi
 if ! grep -q "consoleblank=0" "$CMDLINE"; then
     sed -i 's/$/ consoleblank=0/' "$CMDLINE"
 fi
-log "First-Boot Script + consoleblank=0 eingerichtet"
+# quiet splash aktiviert Plymouths grafischen Theme-Modus
+# ohne splash läuft Plymouth im Textmodus und kann bei Terminate hängen
+if ! grep -q "splash" "$CMDLINE"; then
+    sed -i 's/quiet/quiet splash plymouth.ignore-serial-consoles/' "$CMDLINE"
+fi
+log "First-Boot Service + consoleblank=0 + splash eingerichtet"
 
 # ── SSH aktivieren (für Wartung) ──────────────────────────────────────────────
 touch "$MOUNT_ROOT/boot/firmware/ssh"
