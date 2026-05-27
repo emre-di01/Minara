@@ -82,8 +82,8 @@ section "Image entpacken"
 if [ ! -f "$IMG_RAW" ]; then
     info "Entpacke (kann 1–2 Minuten dauern)..."
     xz -dk "$IMG_XZ" -T0
-    mv "$WORK_DIR/raspios-base.img" "$IMG_RAW" 2>/dev/null || \
-    mv "${IMG_XZ%.xz}" "$IMG_RAW"
+    # xz -dk entpackt direkt nach ${IMG_XZ%.xz} = $IMG_RAW — kein mv nötig
+    [ -f "$IMG_RAW" ] || err "Entpackt, aber $IMG_RAW nicht gefunden"
     log "Entpackt: $IMG_RAW"
 else
     log "Bereits entpackt: $IMG_RAW"
