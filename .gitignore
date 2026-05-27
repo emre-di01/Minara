@@ -6,8 +6,7 @@ dist/
 .DS_Store
 .supabase/
 
-# Pi brand assets (proprietär — nicht einchecken)
+# Pi brand assets — generierte PNGs ignorieren, Quellen (SVG + JSON) committen
 pi/brand/logo.png
-pi/brand/brand.json
 pi/plymouth/mosque-signage/logo.png
 pi/output/

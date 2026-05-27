@@ -61,6 +61,14 @@ if ! command -v qemu-aarch64-static &>/dev/null; then
     apt-get install -y qemu-user-static binfmt-support 2>/dev/null
     update-binfmts --enable qemu-aarch64 2>/dev/null || true
 fi
+
+# cairosvg für SVG→PNG Konvertierung (nur nötig wenn logo.svg vorhanden)
+if [ -f "$SCRIPT_DIR/brand/logo.svg" ]; then
+    if ! python3 -c "import cairosvg" 2>/dev/null; then
+        info "cairosvg installieren (für SVG→PNG)..."
+        pip3 install --quiet cairosvg 2>/dev/null || err "cairosvg konnte nicht installiert werden (pip3 install cairosvg)"
+    fi
+fi
 log "Alle Abhängigkeiten vorhanden"
 
 # ── Verzeichnisse ─────────────────────────────────────────────────────────────
@@ -140,12 +148,39 @@ mkdir -p "$THEME_DST"
 cp "$THEME_SRC/mosque-signage.plymouth" "$THEME_DST/"
 cp "$THEME_SRC/mosque-signage.script"   "$THEME_DST/"
 cp "$THEME_SRC/generate-logo.py"        "$THEME_DST/"
-# Logo: eigenes bevorzugen, sonst im chroot generieren
-if [ -f "$SCRIPT_DIR/brand/logo.png" ]; then
-    cp "$SCRIPT_DIR/brand/logo.png" "$THEME_DST/logo.png"
+
+# Logo: SVG → PNG konvertieren (falls logo.svg vorhanden), sonst logo.png direkt nutzen
+BRAND_PNG="$SCRIPT_DIR/brand/logo.png"
+if [ -f "$SCRIPT_DIR/brand/logo.svg" ]; then
+    info "Konvertiere logo.svg → logo.png..."
+    python3 - "$SCRIPT_DIR/brand/logo.svg" "$BRAND_PNG" << 'PYEOF'
+import sys, re
+import cairosvg
+
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    svg = f.read()
+
+# Background-Rect entfernen
+svg = re.sub(r'<path fill="#FCFCFC" d="M0 0L1024 0L1024 1024L0 1024L0 0Z"/>', '', svg)
+# Standard-Fill weiß (Pfade ohne explizites fill)
+svg = svg.replace('<svg ', '<svg fill="#FFFFFF" ', 1)
+# Navy → Weiß
+svg = svg.replace('fill="#0D0C4D"', 'fill="#FFFFFF"')
+# Weiße Gegen-Formen → dunkler Hintergrund
+svg = svg.replace('fill="#FCFCFC"', 'fill="#09090b"')
+
+cairosvg.svg2png(bytestring=svg.encode(), write_to=dst,
+                 output_width=512, output_height=512)
+PYEOF
+    log "logo.svg → logo.png konvertiert"
+fi
+
+if [ -f "$BRAND_PNG" ]; then
+    cp "$BRAND_PNG" "$THEME_DST/logo.png"
     # auch für WiFi-Portal
-    cp "$SCRIPT_DIR/brand/logo.png" "$MOUNT_ROOT/opt/mosque/brand/logo.png"
-    log "Eigenes Brand-Logo ins Theme + Portal kopiert"
+    cp "$BRAND_PNG" "$MOUNT_ROOT/opt/mosque/brand/logo.png"
+    log "Brand-Logo ins Theme + Portal kopiert"
 fi
 
 # brand.json auf FAT32-Partition (editierbar ohne SSH)
@@ -202,9 +237,20 @@ rm -rf /var/lib/apt/lists/*
 # policy-rc.d wieder entfernen
 rm -f /usr/sbin/policy-rc.d
 
+# ── Pi OS Bookworm: First-Boot-Wizard komplett deaktivieren ──────────────────
+# userconfig.service fragt interaktiv nach Username/Passwort → fatal für Kiosk
+systemctl disable userconfig    2>/dev/null || true
+systemctl mask    userconfig    2>/dev/null || true
+# piwiz = grafischer Einrichtungsassistent (falls vorhanden)
+rm -f /etc/xdg/autostart/piwiz.desktop 2>/dev/null || true
+# Wpa-roam fragt ebenfalls nach User-Input unterdrücken
+rm -f /etc/profile.d/sshpwd.sh 2>/dev/null || true
+
 # Kiosk-User anlegen
 useradd -m -u 1001 -s /bin/bash kiosk 2>/dev/null || true
 usermod -aG video,audio,input,render,netdev,tty kiosk
+# Passwort setzen — nötig damit userconfig.service den User als "konfiguriert" akzeptiert
+echo "kiosk:kiosk" | chpasswd
 
 # XDG_RUNTIME_DIR
 mkdir -p /run/user/1001
@@ -308,8 +354,14 @@ section "First-Boot Script"
 cat > "$MOUNT_ROOT/boot/firmware/firstrun.sh" << 'EOF'
 #!/bin/bash
 # Läuft einmalig beim allerersten Boot
-# 1. Geräte-ID aus Pi-Seriennummer generieren
-# 2. Plymouth-initramfs aktualisieren (geht nur auf laufendem System)
+# 1. Pi OS First-Boot-Wizard sicher deaktivieren
+# 2. Geräte-ID aus Pi-Seriennummer generieren
+# 3. Plymouth-initramfs aktualisieren (geht nur auf laufendem System)
+
+# Sicherheitsnetz: userconfig nochmal deaktivieren (Bookworm-Quirk)
+systemctl disable userconfig 2>/dev/null || true
+systemctl mask    userconfig 2>/dev/null || true
+rm -f /etc/xdg/autostart/piwiz.desktop 2>/dev/null || true
 
 DEVICE_CONF="/boot/firmware/device.json"
 
