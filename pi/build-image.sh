@@ -351,7 +351,7 @@ log "qemu entfernt"
 # ── Komprimieren ──────────────────────────────────────────────────────────────
 section "Image komprimieren"
 info "Komprimiere mit xz (kann 5–10 Minuten dauern)..."
-xz -z -T0 -9 --keep "$IMG_OUT" && mv "${IMG_OUT}.xz" "$WORK_DIR/mosque-signage-pi4.img.xz"
+xz -z -T0 -9 --keep "$IMG_OUT"
 
 FINAL="$WORK_DIR/mosque-signage-pi4.img.xz"
 SIZE=$(du -sh "$FINAL" | cut -f1)
