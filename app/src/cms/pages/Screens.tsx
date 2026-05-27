@@ -175,7 +175,7 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
   }, [])
 
   const isOnline = screen.last_seen_at
-    ? now - new Date(screen.last_seen_at).getTime() < 75_000
+    ? now - new Date(screen.last_seen_at).getTime() < 180_000
     : false
 
   useEffect(() => {

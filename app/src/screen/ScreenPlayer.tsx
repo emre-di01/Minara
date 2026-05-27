@@ -74,10 +74,14 @@ export default function ScreenPlayer({ hardwareId }: Props) {
     load()
 
     function beat() {
-      supabase.from('screens').update({ last_seen_at: new Date().toISOString() }).eq('hardware_id', hardwareId)
+      supabase.from('screens').update({ last_seen_at: new Date().toISOString() }).eq('hardware_id', hardwareId).then(() => {})
     }
     beat()
     const heartbeat = setInterval(beat, 30_000)
+
+    // Sofortiger Beat wenn Tab wieder sichtbar wird (mobile Browser drosseln Intervalle im Hintergrund)
+    function onVisible() { if (document.visibilityState === 'visible') beat() }
+    document.addEventListener('visibilitychange', onVisible)
 
     const channel = supabase
       .channel(`player:${hardwareId}`)
@@ -107,6 +111,7 @@ export default function ScreenPlayer({ hardwareId }: Props) {
 
     return () => {
       clearInterval(heartbeat)
+      document.removeEventListener('visibilitychange', onVisible)
       supabase.removeChannel(channel)
     }
   }, [hardwareId])
@@ -596,9 +601,9 @@ function NoPlaylistScreen({ hardwareId }: { hardwareId: string }) {
     supabase.from('pairing_codes').upsert(
       { code, hardware_id: hardwareId },
       { onConflict: 'hardware_id' }
-    )
+    ).then(() => {})
     return () => {
-      supabase.from('pairing_codes').delete().eq('hardware_id', hardwareId)
+      supabase.from('pairing_codes').delete().eq('hardware_id', hardwareId).then(() => {})
     }
   }, [hardwareId, code])
 
