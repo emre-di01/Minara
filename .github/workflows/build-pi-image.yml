@@ -30,6 +30,6 @@ jobs:
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mosque-signage-pi4
-          path: pi/output/mosque-signage-pi4.img.xz
+          name: minara-pi4
+          path: pi/output/minara-pi4.img.xz
           retention-days: 30    # 30 Tage aufbewahren
