@@ -1,4 +1,4 @@
-# CLAUDE.md — Mosque Signage
+# CLAUDE.md — Minara
 
 ## Projektstruktur auf einen Blick
 

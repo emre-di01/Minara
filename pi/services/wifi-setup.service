@@ -1,5 +1,5 @@
 [Unit]
-Description=Mosque Signage WiFi Setup
+Description=Minara WiFi Setup
 After=local-fs.target
 Before=network.target
 DefaultDependencies=no

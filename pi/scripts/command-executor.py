@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-command-executor.py — Mosque Signage Pi Remote Command Executor
+command-executor.py — Minara Pi Remote Command Executor
 Pollt Supabase alle 10 Sekunden auf pending device_commands und führt sie aus.
 Nutzt nur Python stdlib: urllib.request, json, subprocess, time, os.
 """

@@ -1,13 +1,13 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Mosque Signage — Pi 4 Image Builder
+# Minara — Pi 4 Image Builder
 #
 # Erzeugt ein fertiges .img das direkt geflasht werden kann.
 # Ausführen auf dem Server (x86_64 Linux):
 #   sudo bash pi/build-image.sh
 #
 # Benötigt: qemu-user-static, systemd-nspawn ODER chroot
-# Output:   pi/output/mosque-signage-pi4.img.xz
+# Output:   pi/output/minara-pi4.img.xz
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$SCRIPT_DIR/output"
 IMG_XZ="$WORK_DIR/raspios-base.img.xz"
 IMG_RAW="$WORK_DIR/raspios-base.img"
-IMG_OUT="$WORK_DIR/mosque-signage-pi4.img"
+IMG_OUT="$WORK_DIR/minara-pi4.img"
 MOUNT_BOOT="$WORK_DIR/mnt/boot"
 MOUNT_ROOT="$WORK_DIR/mnt/root"
 
@@ -144,11 +144,11 @@ chmod +x "$MOUNT_ROOT/opt/mosque/scripts/"*.sh
 sed -i "s|CMS_URL=.*|CMS_URL=\"$CMS_URL\"|" "$MOUNT_ROOT/opt/mosque/scripts/start-kiosk.sh"
 
 # Plymouth-Theme kopieren
-THEME_SRC="$SCRIPT_DIR/plymouth/mosque-signage"
-THEME_DST="$MOUNT_ROOT/usr/share/plymouth/themes/mosque-signage"
+THEME_SRC="$SCRIPT_DIR/plymouth/minara"
+THEME_DST="$MOUNT_ROOT/usr/share/plymouth/themes/minara"
 mkdir -p "$THEME_DST"
-cp "$THEME_SRC/mosque-signage.plymouth" "$THEME_DST/"
-cp "$THEME_SRC/mosque-signage.script"   "$THEME_DST/"
+cp "$THEME_SRC/minara.plymouth" "$THEME_DST/"
+cp "$THEME_SRC/minara.script"   "$THEME_DST/"
 cp "$THEME_SRC/generate-logo.py"        "$THEME_DST/"
 
 # Logo: SVG → PNG konvertieren (falls logo.svg vorhanden), sonst logo.png direkt nutzen
@@ -279,16 +279,16 @@ systemctl enable mosque-commander.service
 systemctl enable avahi-daemon
 
 # Plymouth Boot-Theme aktivieren
-THEME_DIR="/usr/share/plymouth/themes/mosque-signage"
+THEME_DIR="/usr/share/plymouth/themes/minara"
 if [ -d "$THEME_DIR" ]; then
     # Logo generieren falls keins vorhanden
     if [ ! -f "$THEME_DIR/logo.png" ] && [ -f "$THEME_DIR/generate-logo.py" ]; then
         python3 "$THEME_DIR/generate-logo.py" 2>/dev/null || true
     fi
     # Theme als Standard setzen
-    plymouth-set-default-theme mosque-signage 2>/dev/null || true
+    plymouth-set-default-theme minara 2>/dev/null || true
     # Kein update-initramfs hier — wird beim ersten Boot via firstrun gemacht
-    echo "[chroot] Plymouth-Theme: mosque-signage"
+    echo "[chroot] Plymouth-Theme: minara"
 fi
 
 # Hardware Watchdog
@@ -412,7 +412,7 @@ section "Image komprimieren"
 info "Komprimiere mit xz (kann 5–10 Minuten dauern)..."
 xz -z -T0 -9 --keep "$IMG_OUT"
 
-FINAL="$WORK_DIR/mosque-signage-pi4.img.xz"
+FINAL="$WORK_DIR/minara-pi4.img.xz"
 SIZE=$(du -sh "$FINAL" | cut -f1)
 
 echo ""
@@ -425,7 +425,7 @@ echo -e "  Größe: ${BLUE}$SIZE${NC}"
 echo ""
 echo "  Flashen:"
 echo "  → Raspberry Pi Imager öffnen"
-echo "  → 'Custom Image' wählen → mosque-signage-pi4.img.xz"
+echo "  → 'Custom Image' wählen → minara-pi4.img.xz"
 echo "  → Auf SD-Karte schreiben"
 echo "  → Pi einschalten → fertig"
 echo ""

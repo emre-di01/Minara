@@ -1,5 +1,5 @@
 [Unit]
-Description=Mosque Signage WiFi Portal
+Description=Minara WiFi Portal
 After=network.target
 
 [Service]

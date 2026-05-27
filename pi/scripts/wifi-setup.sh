@@ -4,7 +4,7 @@
 
 WIFI_CONF="/boot/firmware/wifi.conf"
 AP_FLAG="/tmp/hotspot_active"
-AP_SSID="MosqueScreen-$(cat /sys/class/net/wlan0/address | tr -d ':' | tail -c 5 | tr '[:lower:]' '[:upper:]')"
+AP_SSID="Minara-$(cat /sys/class/net/wlan0/address | tr -d ':' | tail -c 5 | tr '[:lower:]' '[:upper:]')"
 IFACE="wlan0"
 MAX_WAIT=30   # Sekunden auf Verbindung warten
 

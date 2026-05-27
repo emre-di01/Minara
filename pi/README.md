@@ -1,4 +1,4 @@
-# Mosque Signage — Raspberry Pi Setup
+# Minara — Raspberry Pi Setup
 
 ## Hardware
 
@@ -36,7 +36,7 @@ curl -sSL https://raw.githubusercontent.com/emre-di01/mosque-signage/main/pi/ins
 
 Oder wenn das Repo geklont ist:
 ```bash
-cd mosque-signage/pi && sudo bash install.sh
+cd minara/pi && sudo bash install.sh
 ```
 
 ### Schritt 3 — Neu starten
@@ -54,7 +54,7 @@ sudo reboot
 │  1. Pi bootet                                        │
 │     ↓                                               │
 │  2. Kein WLAN konfiguriert                          │
-│     → Pi erstellt Hotspot: "MosqueScreen-XXXXX"    │
+│     → Pi erstellt Hotspot: "Minara-XXXXX"    │
 │     → Offen, kein Passwort                         │
 │     ↓                                               │
 │  3. Mit Handy/Laptop verbinden                      │

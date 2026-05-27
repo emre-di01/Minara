@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mosque Signage — lokale Entwicklungsumgebung starten
+# Minara — lokale Entwicklungsumgebung starten
 
 set -e
 cd "$(dirname "$0")"

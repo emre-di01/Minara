@@ -1,4 +1,4 @@
-# Mosque Signage
+# Minara
 
 Digital-Signage-Plattform für Moscheen — Echtzeit-Playlist-Steuerung, Gebetszeiten, mehrsprachig.
 
@@ -16,7 +16,7 @@ Digital-Signage-Plattform für Moscheen — Echtzeit-Playlist-Steuerung, Gebetsz
 ## Projektstruktur
 
 ```
-mosque-signage/
+minara/
 ├── app/
 │   └── src/
 │       ├── cms/
@@ -336,7 +336,7 @@ npm run dev
 
 ```bash
 # Build & Deploy (auf dem Server)
-cd ~/dev/mosque-signage/app
+cd ~/dev/minara/app
 npm run build
 # Nginx serviert app/dist/ automatisch — kein Restart nötig
 ```

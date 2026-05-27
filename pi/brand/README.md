@@ -11,7 +11,7 @@ Dateien in diesem Ordner werden ins Image gebrannt und auf dem Pi unter
 - **WiFi-Portal:** Im Kopfbereich der Setup-Seite (max. 48 px hoch)
 
 Wenn keine `logo.png` vorhanden ist, wird automatisch ein Text-Logo mit dem
-Schriftzug „MOSQUESCREEN" generiert.
+Schriftzug „MINARA" generiert.
 
 ## brand.json (optional)
 

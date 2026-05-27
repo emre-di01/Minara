@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Mosque Signage — Raspberry Pi 4 Setup Script
+# Minara — Raspberry Pi 4 Setup Script
 # Getestet auf: Raspberry Pi OS Lite Bookworm (64-bit)
 #
 # Ausführen nach SSH-Login:
@@ -28,7 +28,7 @@ section() { echo -e "\n${BLUE}── $* ──${NC}"; }
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   Mosque Signage — Pi 4 Setup        ║${NC}"
+echo -e "${GREEN}║   Minara — Pi 4 Setup        ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
 echo ""
 
@@ -130,13 +130,13 @@ chown -R "$KIOSK_USER:$KIOSK_USER" "$INSTALL_DIR"
 
 # ── 3b. Plymouth-Theme installieren ──────────────────────────────────────────
 section "Boot-Theme installieren"
-THEME_SRC="${SCRIPT_DIR:-/tmp/mosque-pi}/plymouth/mosque-signage"
-THEME_DST="/usr/share/plymouth/themes/mosque-signage"
+THEME_SRC="${SCRIPT_DIR:-/tmp/mosque-pi}/plymouth/minara"
+THEME_DST="/usr/share/plymouth/themes/minara"
 
 if [ -d "$THEME_SRC" ]; then
     mkdir -p "$THEME_DST"
-    cp "$THEME_SRC/mosque-signage.plymouth" "$THEME_DST/"
-    cp "$THEME_SRC/mosque-signage.script"   "$THEME_DST/"
+    cp "$THEME_SRC/minara.plymouth" "$THEME_DST/"
+    cp "$THEME_SRC/minara.script"   "$THEME_DST/"
 
     # Logo: eigenes bevorzugen, sonst generieren
     if [ -f "$INSTALL_DIR/brand/logo.png" ]; then
@@ -150,9 +150,9 @@ if [ -d "$THEME_SRC" ]; then
     fi
 
     if command -v plymouth-set-default-theme &>/dev/null; then
-        plymouth-set-default-theme mosque-signage 2>/dev/null && \
+        plymouth-set-default-theme minara 2>/dev/null && \
             update-initramfs -u -k all 2>/dev/null && \
-            log "Plymouth-Theme aktiv: mosque-signage" || \
+            log "Plymouth-Theme aktiv: minara" || \
             warn "Plymouth theme setzen fehlgeschlagen (nicht kritisch)"
     else
         warn "plymouth-set-default-theme nicht gefunden — Theme kopiert aber nicht aktiv"
@@ -369,7 +369,7 @@ echo -e "  Geräte-ID:  ${BLUE}$DEVICE_ID${NC}"
 echo -e "  Hostname:   ${BLUE}mosque-screen.local${NC}"
 echo ""
 echo "  Nach dem Neustart:"
-echo "  1. Pi erstellt Hotspot: MosqueScreen-XXXXX (offen, kein Passwort)"
+echo "  1. Pi erstellt Hotspot: Minara-XXXXX (offen, kein Passwort)"
 echo "  2. Mit Handy verbinden → Browser → http://192.168.4.1:8080"
 echo "  3. Heimnetz auswählen + ggf. Passwort → Verbinden"
 echo "  4. Kiosk startet → Pairing-Code im CMS eingeben"

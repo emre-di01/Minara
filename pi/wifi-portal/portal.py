@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mosque Signage – WiFi Setup Portal
+Minara – WiFi Setup Portal
 Läuft immer auf Port 8080.
 Beim Booten ohne WiFi: Pi ist Hotspot → User verbindet sich → öffnet 192.168.4.1:8080
 Wenn schon verbunden: erreichbar via http://mosque-screen.local:8080
@@ -27,7 +27,7 @@ AP_FLAG      = "/tmp/hotspot_active"
 def get_brand() -> dict:
     """Liest Branding-Konfig. Fallback auf Defaults."""
     defaults = {
-        "name":  "MosqueScreen",
+        "name":  "Minara",
         "color": "#10b981",          # Akzentfarbe (hex)
         "color_dark": "#064e3b",     # Dunkle Variante für Status-Boxen
     }

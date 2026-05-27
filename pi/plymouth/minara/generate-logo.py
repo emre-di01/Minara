@@ -30,10 +30,10 @@ def rgba(r, g, b, a=255) -> bytes:
 
 
 # ── Logo zeichnen ─────────────────────────────────────────────────────────────
-# 320 × 80 px  — weißer Text "MosqueScreen" auf transparentem Grund
+# 320 × 80 px  — weißer Text "MINARA" auf transparentem Grund
 W, H = 320, 80
 
-# Pixel-Schriftdaten für "MosqueScreen" — 5×7 Bitmap-Font, nur A-Z + Leerzeichen
+# Pixel-Schriftdaten für "MINARA" — 5×7 Bitmap-Font, nur A-Z + Leerzeichen
 FONT = {
     'A': ["01110","10001","10001","11111","10001","10001","10001"],
     'B': ["11110","10001","10001","11110","10001","10001","11110"],
@@ -58,7 +58,7 @@ FONT = {
     ' ': ["00000","00000","00000","00000","00000","00000","00000"],
 }
 
-TEXT = "MOSQUESCREEN"
+TEXT = "MINARA"
 SCALE = 2
 CHAR_W = 5 * SCALE
 CHAR_H = 7 * SCALE
