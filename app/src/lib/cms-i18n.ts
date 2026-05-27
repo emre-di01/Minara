@@ -55,6 +55,10 @@ export interface CmsStrings {
     noSchedule: string; noRules: string; addRule: string; ruleLabel: string  // template {n}
     days: string[]     // ['So','Mo','Di','Mi','Do','Fr','Sa']
     from: string; to: string
+    azan: string; azanEnabled: string; azanOverlay: string; azanOverlayHint: string
+    azanUpload: string; azanRemove: string; azanNoAudio: string
+    azanFajr: string; azanDhuhr: string; azanAsr: string; azanMaghrib: string; azanIsha: string
+    azanSave: string; azanSaving: string; azanClose: string
   }
   st: {
     title: string; mosqueName: string; address: string; logo: string
@@ -157,6 +161,12 @@ export const CMS: Record<CmsLang, CmsStrings> = {
       noRules:'Keine Regeln', addRule:'Regel hinzufügen', ruleLabel:'Regel {n}',
       days:['So','Mo','Di','Mi','Do','Fr','Sa'],
       from:'Von', to:'Bis',
+      azan:'Ezan', azanEnabled:'Ezan aktivieren', azanOverlay:'Vollbild-Overlay',
+      azanOverlayHint:'Zeigt eine Ezan-Anzeige auf dem Bildschirm',
+      azanUpload:'Audio hochladen', azanRemove:'Entfernen', azanNoAudio:'Kein Audio gesetzt',
+      azanFajr:'Sabah / Fajr', azanDhuhr:'Öğle / Dhuhr', azanAsr:'İkindi / Asr',
+      azanMaghrib:'Akşam / Mağrib', azanIsha:'Yatsı / Işa',
+      azanSave:'Speichern', azanSaving:'Speichert…', azanClose:'Schließen',
     },
     st: {
       title:'Einstellungen', mosqueName:'Moschee-Name', address:'Adresse', logo:'Logo',
@@ -271,6 +281,12 @@ export const CMS: Record<CmsLang, CmsStrings> = {
       noRules:'No rules', addRule:'Add rule', ruleLabel:'Rule {n}',
       days:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],
       from:'From', to:'To',
+      azan:'Azan', azanEnabled:'Enable Azan', azanOverlay:'Fullscreen Overlay',
+      azanOverlayHint:'Shows an azan display on screen during prayer time',
+      azanUpload:'Upload audio', azanRemove:'Remove', azanNoAudio:'No audio set',
+      azanFajr:'Fajr', azanDhuhr:'Dhuhr', azanAsr:'Asr',
+      azanMaghrib:'Maghrib', azanIsha:'Isha',
+      azanSave:'Save', azanSaving:'Saving…', azanClose:'Close',
     },
     st: {
       title:'Settings', mosqueName:'Mosque Name', address:'Address', logo:'Logo',
@@ -385,6 +401,12 @@ export const CMS: Record<CmsLang, CmsStrings> = {
       noRules:'Kural yok', addRule:'Kural ekle', ruleLabel:'Kural {n}',
       days:['Paz','Pzt','Sal','Çar','Per','Cum','Cmt'],
       from:'Başlangıç', to:'Bitiş',
+      azan:'Ezan', azanEnabled:'Ezan etkinleştir', azanOverlay:'Tam Ekran',
+      azanOverlayHint:'Ezan sırasında ekranda göster',
+      azanUpload:'Ses yükle', azanRemove:'Kaldır', azanNoAudio:'Ses ayarlanmadı',
+      azanFajr:'Sabah', azanDhuhr:'Öğle', azanAsr:'İkindi',
+      azanMaghrib:'Akşam', azanIsha:'Yatsı',
+      azanSave:'Kaydet', azanSaving:'Kaydediliyor…', azanClose:'Kapat',
     },
     st: {
       title:'Ayarlar', mosqueName:'Cami Adı', address:'Adres', logo:'Logo',
@@ -495,6 +517,12 @@ export const CMS: Record<CmsLang, CmsStrings> = {
       noRules:'لا توجد قواعد', addRule:'إضافة قاعدة', ruleLabel:'قاعدة {n}',
       days:['أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'],
       from:'من', to:'إلى',
+      azan:'الأذان', azanEnabled:'تفعيل الأذان', azanOverlay:'شاشة كاملة',
+      azanOverlayHint:'عرض شاشة الأذان خلال وقت الصلاة',
+      azanUpload:'رفع الصوت', azanRemove:'حذف', azanNoAudio:'لم يتم تعيين صوت',
+      azanFajr:'الفجر', azanDhuhr:'الظهر', azanAsr:'العصر',
+      azanMaghrib:'المغرب', azanIsha:'العشاء',
+      azanSave:'حفظ', azanSaving:'جار الحفظ…', azanClose:'إغلاق',
     },
     st: {
       title:'الإعدادات', mosqueName:'اسم المسجد', address:'العنوان', logo:'الشعار',
@@ -605,6 +633,12 @@ export const CMS: Record<CmsLang, CmsStrings> = {
       noRules:'Aucune règle', addRule:'Ajouter une règle', ruleLabel:'Règle {n}',
       days:['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'],
       from:'De', to:'À',
+      azan:'Adhan', azanEnabled:'Activer l\'adhan', azanOverlay:'Plein écran',
+      azanOverlayHint:'Afficher l\'adhan à l\'écran',
+      azanUpload:'Charger audio', azanRemove:'Supprimer', azanNoAudio:'Aucun audio défini',
+      azanFajr:'Fajr', azanDhuhr:'Dhouhr', azanAsr:'Asr',
+      azanMaghrib:'Maghrib', azanIsha:'Isha',
+      azanSave:'Enregistrer', azanSaving:'Enregistrement…', azanClose:'Fermer',
     },
     st: {
       title:'Paramètres', mosqueName:'Nom de la Mosquée', address:'Adresse', logo:'Logo',
@@ -715,6 +749,12 @@ export const CMS: Record<CmsLang, CmsStrings> = {
       noRules:'Geen regels', addRule:'Regel toevoegen', ruleLabel:'Regel {n}',
       days:['Zo','Ma','Di','Wo','Do','Vr','Za'],
       from:'Van', to:'Tot',
+      azan:'Adhan', azanEnabled:'Adhan inschakelen', azanOverlay:'Volledig scherm',
+      azanOverlayHint:'Toont adhan-scherm tijdens gebedstijd',
+      azanUpload:'Audio uploaden', azanRemove:'Verwijderen', azanNoAudio:'Geen audio ingesteld',
+      azanFajr:'Fajr', azanDhuhr:'Dhohr', azanAsr:'Asr',
+      azanMaghrib:'Maghrib', azanIsha:'Isha',
+      azanSave:'Opslaan', azanSaving:'Opslaan…', azanClose:'Sluiten',
     },
     st: {
       title:'Instellingen', mosqueName:'Naam Moskee', address:'Adres', logo:'Logo',
@@ -825,6 +865,12 @@ export const CMS: Record<CmsLang, CmsStrings> = {
       noRules:'Nema pravila', addRule:'Dodaj pravilo', ruleLabel:'Pravilo {n}',
       days:['Ned','Pon','Uto','Sri','Čet','Pet','Sub'],
       from:'Od', to:'Do',
+      azan:'Ezan', azanEnabled:'Aktiviraj ezan', azanOverlay:'Cijeli ekran',
+      azanOverlayHint:'Prikazuje ezan na ekranu tokom vremena namaza',
+      azanUpload:'Učitaj zvuk', azanRemove:'Ukloni', azanNoAudio:'Nije postavljen zvuk',
+      azanFajr:'Sabah', azanDhuhr:'Podne', azanAsr:'Ikindija',
+      azanMaghrib:'Akšam', azanIsha:'Jacija',
+      azanSave:'Sačuvaj', azanSaving:'Čuvanje…', azanClose:'Zatvori',
     },
     st: {
       title:'Postavke', mosqueName:'Naziv Džamije', address:'Adresa', logo:'Logo',

@@ -55,6 +55,7 @@ export interface Screen {
   owner_id: string
   city_id: number | null
   schedule?: ScheduleEntry[]
+  azan_config?: AzanConfig | null
 }
 
 export interface PairingCode {
@@ -118,3 +119,21 @@ export interface CalculatedSource {
 }
 
 export type PrayerSource = DiyanetSource | CalculatedSource
+
+// ── Ezan / Azan ───────────────────────────────────────────────────────────────
+
+export type AzanPrayer = 'fajr' | 'dhuhr' | 'asr' | 'maghrib' | 'isha'
+
+export interface AzanPrayerConfig {
+  /** Public URL zur Audio-Datei im Supabase Storage (null = kein eigener Ton) */
+  url: string | null
+}
+
+export interface AzanConfig {
+  /** Ezan-Feature für diesen Screen aktiv */
+  enabled: boolean
+  /** Vollbild-Overlay während des Ezans anzeigen */
+  overlay: boolean
+  /** Pro Gebet individuelle Audio-Datei */
+  prayers: Partial<Record<AzanPrayer, AzanPrayerConfig>>
+}

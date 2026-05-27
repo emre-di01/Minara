@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/auth'
 import Layout from '../components/Layout'
 import CityPicker from '../components/CityPicker'
-import type { Screen, Playlist, ScheduleEntry } from '../../types'
+import type { AzanConfig, AzanPrayer, Screen, Playlist, ScheduleEntry } from '../../types'
 import { useCmsT } from '../../lib/cms-lang'
 import { tpl, tplNamed } from '../../lib/cms-i18n'
 
@@ -83,6 +83,11 @@ export default function Screens() {
     if (data) setScreens(prev => prev.map(s => s.id === screenId ? data as Screen : s))
   }
 
+  async function saveAzan(screenId: string, azanConfig: AzanConfig) {
+    const { data } = await supabase.from('screens').update({ azan_config: azanConfig }).eq('id', screenId).select().single()
+    if (data) setScreens(prev => prev.map(s => s.id === screenId ? data as Screen : s))
+  }
+
   return (
     <Layout>
       <div className="p-6">
@@ -127,6 +132,7 @@ export default function Screens() {
                 <ScreenCard key={s.id} screen={s} playlists={playlists}
                   onAssign={assignPlaylist} onCityAssign={assignCity}
                   onScheduleSave={saveSchedule}
+                  onAzanSave={saveAzan}
                   onDelete={() => window.confirm(tplNamed(t.sc.confirmDelete, { name: s.name })) && remove(s.id)}
                   deleting={deleting === s.id} />
               ))}
@@ -142,18 +148,20 @@ export default function Screens() {
   )
 }
 
-function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave, onDelete, deleting }: {
+function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave, onAzanSave, onDelete, deleting }: {
   screen: Screen
   playlists: Playlist[]
   onAssign: (screenId: string, playlistId: string | null) => void
   onCityAssign: (screenId: string, cityId: number | null) => void
   onScheduleSave: (screenId: string, schedule: ScheduleEntry[]) => void
+  onAzanSave: (screenId: string, config: AzanConfig) => void
   onDelete: () => void
   deleting: boolean
 }) {
   const t = useCmsT()
   const [showCityPicker, setShowCityPicker] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
+  const [showAzan, setShowAzan] = useState(false)
   const [pairingCode, setPairingCode] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
 
@@ -253,6 +261,29 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
           />
         )}
       </div>
+
+      {/* Ezan */}
+      <div className="border-t border-gray-800 pt-2">
+        <div className="flex items-center justify-between">
+          <span className="text-gray-500 text-xs">
+            🔊 {screen.azan_config?.enabled ? t.sc.azanEnabled : t.sc.azan}
+            {screen.azan_config?.enabled && (
+              <span className="ml-1.5 text-emerald-500">●</span>
+            )}
+          </span>
+          <button onClick={() => setShowAzan(s => !s)}
+            className="text-xs text-emerald-400 hover:text-emerald-300 transition">
+            {showAzan ? t.sc.azanClose : t.sc.azan}
+          </button>
+        </div>
+        {showAzan && (
+          <AzanEditor
+            screenId={screen.id}
+            config={screen.azan_config ?? null}
+            onSave={cfg => { onAzanSave(screen.id, cfg); setShowAzan(false) }}
+          />
+        )}
+      </div>
     </div>
   )
 }
@@ -331,6 +362,175 @@ function ScheduleEditor({ schedule: initial, playlists, onSave }: {
   )
 }
 
+
+// ── AzanEditor ───────────────────────────────────────────────────────────────
+
+const AZAN_PRAYERS: { key: AzanPrayer; labelKey: keyof ReturnType<typeof useCmsT>['sc'] }[] = [
+  { key: 'fajr',    labelKey: 'azanFajr'    },
+  { key: 'dhuhr',   labelKey: 'azanDhuhr'   },
+  { key: 'asr',     labelKey: 'azanAsr'     },
+  { key: 'maghrib', labelKey: 'azanMaghrib' },
+  { key: 'isha',    labelKey: 'azanIsha'    },
+]
+
+function AzanEditor({ screenId, config: initial, onSave }: {
+  screenId: string
+  config: AzanConfig | null
+  onSave: (cfg: AzanConfig) => void
+}) {
+  const t = useCmsT()
+  const { user } = useAuth()
+  const [cfg, setCfg] = useState<AzanConfig>(() => initial ?? {
+    enabled: false,
+    overlay: true,
+    prayers: {},
+  })
+  const [uploading, setUploading] = useState<AzanPrayer | null>(null)
+  const [saving, setSaving] = useState(false)
+  const fileRefs = useRef<Partial<Record<AzanPrayer, HTMLInputElement | null>>>({})
+
+  function toggleEnabled() {
+    setCfg(c => ({ ...c, enabled: !c.enabled }))
+  }
+
+  function toggleOverlay() {
+    setCfg(c => ({ ...c, overlay: !c.overlay }))
+  }
+
+  async function uploadAudio(prayer: AzanPrayer, file: File) {
+    if (!user) return
+    setUploading(prayer)
+    try {
+      const ext = file.name.split('.').pop() ?? 'mp3'
+      const path = `azan/${user.id}/${screenId}-${prayer}.${ext}`
+
+      // Altes File löschen (falls vorhanden)
+      await supabase.storage.from('media').remove([path])
+
+      const { error } = await supabase.storage.from('media').upload(path, file, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: file.type || 'audio/mpeg',
+      })
+      if (error) throw error
+
+      const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(path)
+      setCfg(c => ({
+        ...c,
+        prayers: { ...c.prayers, [prayer]: { url: publicUrl } },
+      }))
+    } catch (e) {
+      console.error('Azan upload error:', e)
+    } finally {
+      setUploading(null)
+    }
+  }
+
+  async function removeAudio(prayer: AzanPrayer) {
+    const currentUrl = cfg.prayers?.[prayer]?.url
+    if (currentUrl) {
+      // Aus URL den Storage-Pfad extrahieren
+      const path = currentUrl.split('/media/')[1]?.split('?')[0]
+      if (path) await supabase.storage.from('media').remove([path])
+    }
+    setCfg(c => {
+      const prayers = { ...c.prayers }
+      delete prayers[prayer]
+      return { ...c, prayers }
+    })
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    await onSave(cfg)
+    setSaving(false)
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-3">
+      {/* Toggles */}
+      <div className="flex flex-col gap-2 rounded-lg p-3" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+        <label className="flex items-center justify-between cursor-pointer">
+          <span className="text-gray-300 text-xs font-medium">{t.sc.azanEnabled}</span>
+          <div
+            onClick={toggleEnabled}
+            className={`relative w-10 h-5 rounded-full transition ${cfg.enabled ? 'bg-emerald-600' : 'bg-gray-700'}`}
+          >
+            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${cfg.enabled ? 'left-5' : 'left-0.5'}`} />
+          </div>
+        </label>
+        <label className="flex items-center justify-between cursor-pointer">
+          <div>
+            <span className="text-gray-300 text-xs font-medium">{t.sc.azanOverlay}</span>
+            <p className="text-gray-600 text-xs">{t.sc.azanOverlayHint}</p>
+          </div>
+          <div
+            onClick={toggleOverlay}
+            className={`relative w-10 h-5 rounded-full transition shrink-0 ml-3 ${cfg.overlay ? 'bg-emerald-600' : 'bg-gray-700'}`}
+          >
+            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${cfg.overlay ? 'left-5' : 'left-0.5'}`} />
+          </div>
+        </label>
+      </div>
+
+      {/* Pro-Gebet Audio */}
+      <div className="flex flex-col gap-1.5">
+        {AZAN_PRAYERS.map(({ key, labelKey }) => {
+          const audioUrl = cfg.prayers?.[key]?.url ?? null
+          const isUploading = uploading === key
+          const fileName = audioUrl ? decodeURIComponent(audioUrl.split('/').pop()?.split('?')[0] ?? '') : null
+          return (
+            <div key={key} className="rounded-lg p-2.5 flex items-center gap-2" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <span className="text-gray-400 text-xs font-medium w-20 shrink-0">
+                {t.sc[labelKey] as string}
+              </span>
+              <div className="flex-1 min-w-0">
+                {audioUrl ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-emerald-400 text-xs truncate flex-1">🎵 {fileName}</span>
+                    <button
+                      onClick={() => removeAudio(key)}
+                      className="text-gray-600 hover:text-red-400 text-xs transition shrink-0"
+                      title={t.sc.azanRemove}
+                    >✕</button>
+                  </div>
+                ) : (
+                  <span className="text-gray-600 text-xs">{t.sc.azanNoAudio}</span>
+                )}
+              </div>
+              <input
+                type="file"
+                accept="audio/*"
+                className="hidden"
+                ref={el => { fileRefs.current[key] = el }}
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (file) uploadAudio(key, file)
+                  e.target.value = ''
+                }}
+              />
+              <button
+                onClick={() => fileRefs.current[key]?.click()}
+                disabled={isUploading}
+                className="shrink-0 text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-40 transition"
+              >
+                {isUploading ? '…' : t.sc.azanUpload}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition"
+      >
+        {saving ? t.sc.azanSaving : t.sc.azanSave}
+      </button>
+    </div>
+  )
+}
 
 function PairingDialog({ onPaired, onClose }: {
   onPaired: (s: Screen) => void

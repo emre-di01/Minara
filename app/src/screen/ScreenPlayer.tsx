@@ -1,11 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import type { MosqueProfile, Playlist, PrayerSource, Screen, ScheduleEntry, Slide, TickerOverlay } from '../types'
+import { getPrayerTimes } from '../lib/prayertimes'
+import type { AzanConfig, AzanPrayer, MosqueProfile, Playlist, PrayerSource, PrayerTimes, Screen, ScheduleEntry, Slide, TickerOverlay } from '../types'
 import SlideRenderer from '../slides/SlideRenderer'
 
 interface Props {
   hardwareId: string
 }
+
+const AZAN_PRAYERS: AzanPrayer[] = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
+const pad = (n: number) => String(n).padStart(2, '0')
 
 export default function ScreenPlayer({ hardwareId }: Props) {
   const [screen, setScreen] = useState<Screen | null>(null)
@@ -110,20 +114,288 @@ export default function ScreenPlayer({ hardwareId }: Props) {
     return <NoPlaylistScreen hardwareId={hardwareId} />
   }
 
-  // Build effective cityId: screen override → profile Diyanet source → profile legacy city_id
+  // Build effective prayer source: screen override → profile source → profile legacy city_id
   const profileSource = profile?.prayer_source ?? null
   const profileCityId = profileSource?.source === 'diyanet' ? profileSource.cityId : (profile?.city_id ?? null)
   const effectiveCityId = screen.city_id ?? profileCityId ?? 0
+  const effectivePrayerSource = profileSource
 
   return (
-    <SlidePlayer
+    <ScreenContent
+      screen={screen}
       playlist={playlist}
-      cityId={effectiveCityId}
-      defaultPrayerSource={profileSource}
       profile={profile}
+      cityId={effectiveCityId}
+      prayerSource={effectivePrayerSource}
     />
   )
 }
+
+// ── ScreenContent: SlidePlayer + Ezan-Trigger ────────────────────────────────
+
+function ScreenContent({
+  screen, playlist, profile, cityId, prayerSource,
+}: {
+  screen: Screen
+  playlist: Playlist
+  profile: MosqueProfile | null
+  cityId: number
+  prayerSource: PrayerSource | null
+}) {
+  const azanConfig = screen.azan_config ?? null
+  const [prayerTimes, setPrayerTimes] = useState<PrayerTimes | null>(null)
+  const [activeAzan, setActiveAzan] = useState<AzanPrayer | null>(null)
+  const lastAzanRef = useRef<string | null>(null) // "fajr-2024-05-27" — verhindert Doppel-Trigger
+
+  // ── Gebetszeiten laden ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!azanConfig?.enabled) return
+    if (!prayerSource && !cityId) return
+
+    function load() {
+      getPrayerTimes(prayerSource, cityId || undefined).then(t => {
+        if (t) setPrayerTimes(t)
+      }).catch(console.error)
+    }
+    load()
+
+    // Täglich um Mitternacht neu laden
+    function scheduleMidnight(): ReturnType<typeof setTimeout> {
+      const n = new Date()
+      const ms = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1).getTime() - n.getTime()
+      return setTimeout(() => { load(); timer = scheduleMidnight() }, ms)
+    }
+    let timer = scheduleMidnight()
+    return () => clearTimeout(timer)
+  }, [azanConfig?.enabled, prayerSource, cityId])
+
+  // ── Ezan-Trigger: jede Sekunde prüfen ───────────────────────────────────────
+  useEffect(() => {
+    if (!azanConfig?.enabled || !prayerTimes) return
+
+    const id = setInterval(() => {
+      const now = new Date()
+      const hhmm = `${pad(now.getHours())}:${pad(now.getMinutes())}`
+      const dateKey = now.toISOString().slice(0, 10) // YYYY-MM-DD
+
+      for (const prayer of AZAN_PRAYERS) {
+        const prayerTime = prayerTimes[prayer] as string | undefined
+        if (!prayerTime || prayerTime !== hhmm) continue
+
+        const triggerKey = `${prayer}-${dateKey}`
+        if (lastAzanRef.current === triggerKey) continue // bereits ausgelöst
+
+        // Prüfen ob für dieses Gebet ein Audio gesetzt oder Overlay an ist
+        const hasPrayerConfig = azanConfig.prayers?.[prayer]
+        const hasAudio = hasPrayerConfig?.url
+        if (!hasAudio && !azanConfig.overlay) continue
+
+        lastAzanRef.current = triggerKey
+        setActiveAzan(prayer)
+        break
+      }
+    }, 1000)
+
+    return () => clearInterval(id)
+  }, [azanConfig, prayerTimes])
+
+  return (
+    <div className="relative h-screen w-screen overflow-hidden">
+      <SlidePlayer
+        playlist={playlist}
+        cityId={cityId}
+        defaultPrayerSource={prayerSource}
+        profile={profile}
+      />
+      {activeAzan && (
+        <AzanOverlay
+          prayer={activeAzan}
+          config={azanConfig!}
+          profile={profile}
+          onEnd={() => setActiveAzan(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Ezan Overlay ─────────────────────────────────────────────────────────────
+
+const ARABIC_PRAYER: Record<AzanPrayer, string> = {
+  fajr:    'الفجر',
+  dhuhr:   'الظهر',
+  asr:     'العصر',
+  maghrib: 'المغرب',
+  isha:    'العشاء',
+}
+
+const PRAYER_LABEL_DE: Record<AzanPrayer, string> = {
+  fajr:    'Sabah · Fajr',
+  dhuhr:   'Öğle · Dhuhr',
+  asr:     'İkindi · Asr',
+  maghrib: 'Akşam · Mağrib',
+  isha:    'Yatsı · Işa',
+}
+
+function AzanOverlay({
+  prayer, config, profile, onEnd,
+}: {
+  prayer: AzanPrayer
+  config: AzanConfig
+  profile: MosqueProfile | null
+  onEnd: () => void
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioUrl = config.prayers?.[prayer]?.url ?? null
+  const mosqueName = profile?.name ?? ''
+
+  // Audio abspielen
+  useEffect(() => {
+    if (!audioUrl) return
+    const audio = new Audio(audioUrl)
+    audioRef.current = audio
+    audio.play().catch(console.error)
+    audio.addEventListener('ended', onEnd)
+    return () => {
+      audio.removeEventListener('ended', onEnd)
+      audio.pause()
+      audioRef.current = null
+    }
+  }, [audioUrl])
+
+  // Kein Audio + Overlay: nach 10 Minuten automatisch schließen
+  useEffect(() => {
+    if (audioUrl) return
+    const t = setTimeout(onEnd, 10 * 60 * 1000)
+    return () => clearTimeout(t)
+  }, [audioUrl])
+
+  if (!config.overlay) return null
+
+  return (
+    <div
+      className="absolute inset-0 flex flex-col items-center justify-center select-none"
+      style={{
+        zIndex: 100,
+        background: 'radial-gradient(ellipse at 50% 40%, #0d1a0f 0%, #050d07 60%, #000 100%)',
+        animation: 'az-fadein 1.2s ease forwards',
+      }}
+    >
+      <style>{`
+        @keyframes az-fadein  { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes az-pulse   { 0%,100% { opacity: 0.6; transform: scale(1) } 50% { opacity: 1; transform: scale(1.04) } }
+        @keyframes az-rise    { from { opacity: 0; transform: translateY(24px) } to { opacity: 1; transform: translateY(0) } }
+        @keyframes az-shimmer { 0%,100% { opacity: 0.3 } 50% { opacity: 0.7 } }
+      `}</style>
+
+      {/* Decorative stars */}
+      <div className="absolute inset-0 overflow-hidden" aria-hidden>
+        {[...Array(24)].map((_, i) => (
+          <div key={i} style={{
+            position: 'absolute',
+            width: i % 3 === 0 ? 3 : 2,
+            height: i % 3 === 0 ? 3 : 2,
+            borderRadius: '50%',
+            background: '#fff',
+            left: `${(i * 17 + 7) % 97}%`,
+            top: `${(i * 23 + 11) % 85}%`,
+            opacity: 0.15 + (i % 5) * 0.08,
+            animation: `az-shimmer ${2.5 + (i % 4) * 0.7}s ease-in-out infinite`,
+            animationDelay: `${(i * 0.3) % 2}s`,
+          }} />
+        ))}
+      </div>
+
+      {/* Crescent moon */}
+      <div style={{ animation: 'az-pulse 3s ease-in-out infinite', marginBottom: '3vh' }} aria-hidden>
+        <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+          <path
+            d="M52 36C52 25.5 44.5 17 35 16C38.5 18.5 41 23.5 41 29.5C41 40 33 48.5 22.5 49C25 55 30.5 59 37 59C46 59 52 48.5 52 36Z"
+            fill="#c9921a"
+            opacity="0.95"
+          />
+          <circle cx="50" cy="20" r="3.5" fill="#c9921a" opacity="0.8" />
+        </svg>
+      </div>
+
+      {/* الأذان */}
+      <div style={{
+        color: 'rgba(201,146,26,0.55)',
+        fontSize: 'clamp(1rem, 2.5vw, 1.8rem)',
+        letterSpacing: '0.35em',
+        fontWeight: 300,
+        textTransform: 'uppercase',
+        animation: 'az-rise 1.5s ease forwards',
+        marginBottom: '1.5vh',
+      }}>
+        الأذان
+      </div>
+
+      {/* Arabic prayer name */}
+      <div style={{
+        fontFamily: '"Scheherazade New", "Noto Naskh Arabic", serif',
+        fontSize: 'clamp(4rem, 14vw, 10rem)',
+        color: '#fff',
+        fontWeight: 400,
+        lineHeight: 1,
+        direction: 'rtl',
+        animation: 'az-rise 1s 0.3s ease both',
+        textShadow: '0 0 80px rgba(201,146,26,0.3)',
+        marginBottom: '2vh',
+      }}>
+        {ARABIC_PRAYER[prayer]}
+      </div>
+
+      {/* Prayer label (DE/TR) */}
+      <div style={{
+        color: 'rgba(255,255,255,0.45)',
+        fontSize: 'clamp(0.9rem, 2.2vw, 1.5rem)',
+        letterSpacing: '0.2em',
+        fontWeight: 300,
+        animation: 'az-rise 1s 0.6s ease both',
+        marginBottom: '6vh',
+      }}>
+        {PRAYER_LABEL_DE[prayer]}
+      </div>
+
+      {/* Divider */}
+      <div style={{
+        width: 'clamp(120px, 20vw, 280px)',
+        height: 1,
+        background: 'linear-gradient(90deg, transparent, rgba(201,146,26,0.4), transparent)',
+        marginBottom: '4vh',
+        animation: 'az-rise 1s 0.8s ease both',
+      }} />
+
+      {/* Mosque name */}
+      {mosqueName && (
+        <div style={{
+          color: 'rgba(255,255,255,0.25)',
+          fontSize: 'clamp(0.75rem, 1.6vw, 1.1rem)',
+          letterSpacing: '0.25em',
+          fontWeight: 400,
+          textTransform: 'uppercase',
+          animation: 'az-rise 1s 1s ease both',
+        }}>
+          {mosqueName}
+        </div>
+      )}
+
+      {/* Close button (nur wenn kein Audio — dann manuell schließen möglich) */}
+      {!audioUrl && (
+        <button
+          onClick={onEnd}
+          className="absolute bottom-8 right-8 text-white/20 hover:text-white/50 text-sm transition"
+          style={{ letterSpacing: '0.1em' }}
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── Rest (unverändert) ────────────────────────────────────────────────────────
 
 function NoPlaylistScreen({ hardwareId }: { hardwareId: string }) {
   const [code] = useState(() => Math.floor(100000 + Math.random() * 900000).toString())
@@ -248,13 +520,11 @@ function SlidePlayer({ playlist, cityId, defaultPrayerSource, profile }: { playl
   return (
     <div className="relative h-screen w-screen overflow-hidden">
       <style>{KEYFRAMES}</style>
-      {/* Ausgehender Slide (Exit-Animation) */}
       {prevIdx !== null && (
         <div key={`exit-${prevIdx}`} style={exitStyle(activeTrans, TRANS_DURATION)}>
           <SlideRenderer slide={slides[prevIdx]} cityId={cityId} defaultPrayerSource={defaultPrayerSource} profile={profile} />
         </div>
       )}
-      {/* Eingehender Slide (Enter-Animation beim Wechsel, sonst statisch) */}
       <div key={`enter-${idx}`} style={prevIdx !== null ? enterStyle(activeTrans, TRANS_DURATION) : { position: 'absolute', inset: 0 }}>
         <SlideRenderer slide={slides[idx]} cityId={cityId} defaultPrayerSource={defaultPrayerSource} profile={profile} />
       </div>
@@ -285,10 +555,8 @@ function OverlayTicker({ overlay }: { overlay: TickerOverlay }) {
     const track = trackRef.current
     if (!container || !track || !items.length) return
 
-    // speed 10 = fast (~300 px/s), speed 60 = slow (~50 px/s)
     const pxPerSec = 3000 / Math.max(10, Math.min(60, overlay.speed ?? 25))
 
-    // start off-screen to the right
     let x = container.clientWidth
     let lastT: number | null = null
     let rafId: number
@@ -297,7 +565,6 @@ function OverlayTicker({ overlay }: { overlay: TickerOverlay }) {
       if (lastT === null) lastT = t
       x -= pxPerSec * ((t - lastT) / 1000)
       lastT = t
-      // seamless loop: track holds 2 identical copies; one copy = half the scroll width
       const half = track!.scrollWidth / 2
       if (x <= -half) x += half
       track!.style.transform = `translateX(${x}px)`
@@ -321,7 +588,6 @@ function OverlayTicker({ overlay }: { overlay: TickerOverlay }) {
       <div ref={trackRef}
         className="inline-flex shrink-0 whitespace-nowrap font-light"
         style={{ color: s.text, fontSize: 'clamp(1.1rem,2vw,1.7rem)', willChange: 'transform' }}>
-        {/* two identical copies — when copy 1 exits left, copy 2 is exactly where copy 1 started */}
         <span className="inline-flex">{band}</span>
         <span className="inline-flex">{band}</span>
       </div>
