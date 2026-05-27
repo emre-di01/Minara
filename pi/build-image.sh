@@ -143,6 +143,12 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+# Service-Start im chroot verhindern (kein Init-System vorhanden)
+# policy-rc.d mit Exit 101 = "action not allowed" → apt startet keine Services
+echo '#!/bin/sh
+exit 101' > /usr/sbin/policy-rc.d
+chmod +x /usr/sbin/policy-rc.d
+
 # Pakete
 apt-get update -qq
 apt-get install -y --no-install-recommends \
@@ -167,6 +173,9 @@ apt-get install -y --no-install-recommends \
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*
+
+# policy-rc.d wieder entfernen
+rm -f /usr/sbin/policy-rc.d
 
 # Kiosk-User anlegen
 useradd -m -u 1001 -s /bin/bash kiosk 2>/dev/null || true
