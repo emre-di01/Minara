@@ -52,7 +52,8 @@ export default function PairingScreen({ hardwareId, onPaired }: Props) {
         <p className="text-gray-400 mb-6 tracking-widest uppercase text-sm">
           Screen koppeln
         </p>
-        <div className="font-mono text-8xl font-bold tracking-[0.4em] bg-gray-800 px-10 py-8 rounded-3xl select-none">
+        <div className="font-mono font-bold bg-gray-800 rounded-3xl select-none"
+          style={{ fontSize: 'min(12vw, 6rem)', letterSpacing: '0.35em', padding: 'clamp(1rem, 3vw, 2rem) clamp(1.5rem, 4vw, 2.5rem)' }}>
           {code || '------'}
         </div>
         <p className="text-gray-600 text-sm mt-6">

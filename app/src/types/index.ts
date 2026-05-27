@@ -19,13 +19,26 @@ export interface WidgetConfig {
   config: Record<string, unknown>
 }
 
+export interface TickerOverlay {
+  enabled: boolean
+  texts: string[]
+  style: 'dark' | 'gold' | 'green' | 'light'
+  speed: number
+}
+
+export interface ScheduleEntry {
+  playlist_id: string
+  days: number[]      // 0=So, 1=Mo, 2=Di, 3=Mi, 4=Do, 5=Fr, 6=Sa
+  start_time: string  // "HH:MM"
+  end_time: string    // "HH:MM"
+}
+
 export interface Playlist {
   id: string
   name: string
-  theme: ThemeId
-  widgets: WidgetConfig[]
-  mode: 'widgets' | 'slides'
   slides: Slide[]
+  ticker_overlay?: TickerOverlay | null
+  transition?: 'fade' | 'slide' | 'zoom' | 'none'
   owner_id: string
   created_at: string
 }
@@ -40,7 +53,8 @@ export interface Screen {
   playlist_id: string | null
   last_seen_at: string | null
   owner_id: string
-  city_id: number | null   // Diyanet city ID für Gebetszeiten
+  city_id: number | null
+  schedule?: ScheduleEntry[]
 }
 
 export interface PairingCode {
@@ -51,11 +65,26 @@ export interface PairingCode {
 
 export type PrayerTheme = 'madinah' | 'bosphorus' | 'mekka' | 'night'
 
+export type SlideTransition = 'fade' | 'slide' | 'zoom' | 'none'
+
 export interface Slide {
   id: string
-  type: 'prayer_times' | 'media' | 'ticker' | 'rss' | 'weather' | 'hadith' | 'quran' | 'asmaul_husna'
+  type: 'prayer_times' | 'media' | 'ticker' | 'rss' | 'weather' | 'hadith' | 'quran' | 'asmaul_husna' | 'events' | 'donation' | 'social_follow' | 'instagram_feed' | 'ramadan' | 'jumu_a'
   duration: number  // seconds; 0 = stays until playlist loops
+  transition?: SlideTransition  // transition OUT of this slide (to the next)
   config: Record<string, unknown>
+}
+
+export interface MosqueProfile {
+  user_id: string
+  name: string
+  address: string
+  logo_url: string | null
+  city_id: number | null
+  city_name: string | null
+  /** Unified prayer-times source — overrides city_id/city_name when set */
+  prayer_source: PrayerSource | null
+  created_at: string
 }
 
 // AwqatSalah API response shape
@@ -68,3 +97,24 @@ export interface PrayerTimes {
   isha: string
   hijriDateLong?: string
 }
+
+// Prayer time source configuration
+export type PrayerMethod =
+  | 'MWL' | 'ISNA' | 'Egyptian' | 'UmmAlQura' | 'Karachi'
+  | 'Dubai' | 'Qatar' | 'Kuwait' | 'Singapore' | 'Tehran' | 'Turkey'
+
+export interface DiyanetSource {
+  source: 'diyanet'
+  cityId: number
+  cityName?: string
+}
+
+export interface CalculatedSource {
+  source: 'calculated'
+  lat: number
+  lng: number
+  method: PrayerMethod
+  locationName?: string
+}
+
+export type PrayerSource = DiyanetSource | CalculatedSource

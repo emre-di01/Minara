@@ -29,3 +29,16 @@ export function getStates(countryId: number) {
 export function getCities(stateId: number) {
   return get<{ id: number; name: string }[]>(`/api/Place/Cities/${stateId}`)
 }
+
+export interface DailyContent {
+  hadith: string
+  hadithSource: string
+  verse: string
+  verseSource: string
+  pray: string
+  praySource: string | null
+}
+
+export function getDailyContent(): Promise<DailyContent> {
+  return get<DailyContent>('/api/DailyContent')
+}
