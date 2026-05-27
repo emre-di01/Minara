@@ -101,6 +101,34 @@ export default function ScreenPlayer({ hardwareId }: Props) {
     return () => clearInterval(id)
   }, [screen])
 
+  // Web Wake Lock — verhindert Bildschirm-Abschalten im Kiosk-Modus
+  useEffect(() => {
+    const wl = (navigator as any).wakeLock
+    if (!wl) return
+
+    let lock: any = null
+
+    async function acquire() {
+      try {
+        lock = await wl.request('screen')
+      } catch {
+        // ignorieren — z.B. wenn Tab im Hintergrund
+      }
+    }
+
+    acquire()
+
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible') acquire()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      lock?.release()
+    }
+  }, [])
+
   if (!screen) {
     return (
       <div className="h-screen w-screen bg-gray-950 flex items-center justify-center">

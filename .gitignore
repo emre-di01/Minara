@@ -10,3 +10,4 @@ dist/
 pi/brand/logo.png
 pi/plymouth/mosque-signage/logo.png
 pi/output/
+.claude/

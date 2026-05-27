@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/auth'
 import Layout from '../components/Layout'
 import CityPicker from '../components/CityPicker'
-import type { AzanConfig, AzanPrayer, Screen, Playlist, ScheduleEntry } from '../../types'
+import type { AzanConfig, AzanPrayer, DeviceCommand, Screen, Playlist, ScheduleEntry } from '../../types'
 import { useCmsT } from '../../lib/cms-lang'
 import { tpl, tplNamed } from '../../lib/cms-i18n'
 
@@ -162,6 +162,9 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
   const [showCityPicker, setShowCityPicker] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
   const [showAzan, setShowAzan] = useState(false)
+  const [showRemote, setShowRemote] = useState(false)
+  const [cmdSending, setCmdSending] = useState<string | null>(null)
+  const [lastCmd, setLastCmd] = useState<{ text: string, ok: boolean } | null>(null)
   const [pairingCode, setPairingCode] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
 
@@ -182,6 +185,19 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
 
   const scheduleCount = screen.schedule?.length ?? 0
 
+  async function sendCommand(command: DeviceCommand['command'], payload: Record<string, unknown> = {}) {
+    setCmdSending(command)
+    setLastCmd(null)
+    const { error } = await supabase.from('device_commands').insert({
+      hardware_id: screen.hardware_id,
+      command,
+      payload,
+    })
+    setLastCmd({ text: error ? error.message : 'Befehl gesendet', ok: !error })
+    setCmdSending(null)
+    setTimeout(() => setLastCmd(null), 4000)
+  }
+
   return (
     <div className="bg-gray-900 rounded-xl p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -190,6 +206,13 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
           <span className={`text-xs px-2 py-0.5 rounded-full ${isOnline ? 'bg-emerald-900 text-emerald-400' : 'bg-gray-800 text-gray-500'}`}>
             {isOnline ? t.sc.online : t.sc.offline}
           </span>
+          <button
+            onClick={() => setShowRemote(v => !v)}
+            title="Remote-Befehle"
+            className={`text-sm p-0.5 transition ${showRemote ? 'text-emerald-400' : 'text-gray-600 hover:text-gray-400'}`}
+          >
+            📡
+          </button>
           <button
             onClick={onDelete}
             disabled={deleting}
@@ -284,6 +307,38 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
           />
         )}
       </div>
+
+      {/* Remote-Befehle */}
+      {showRemote && (
+        <div className="border-t border-gray-800 pt-2">
+          <p className="text-gray-500 text-xs mb-2">Remote-Befehle</p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { cmd: 'restart_kiosk' as const, label: '🔄 Kiosk-Neustart' },
+              { cmd: 'reboot'        as const, label: '⚡ Pi-Neustart'    },
+              { cmd: 'clear_cache'   as const, label: '🧹 Cache leeren'   },
+              { cmd: 'update_scripts'as const, label: '⬆️ Scripts updaten' },
+            ] as { cmd: DeviceCommand['command']; label: string }[]).map(({ cmd, label }) => (
+              <button
+                key={cmd}
+                onClick={() => sendCommand(cmd)}
+                disabled={cmdSending !== null}
+                className="flex items-center justify-center gap-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-300 text-xs font-medium px-2 py-2 rounded-lg transition"
+              >
+                {cmdSending === cmd ? (
+                  <span className="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin inline-block" />
+                ) : null}
+                {label}
+              </button>
+            ))}
+          </div>
+          {lastCmd && (
+            <p className={`text-xs mt-2 ${lastCmd.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+              {lastCmd.text}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

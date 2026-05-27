@@ -130,12 +130,14 @@ log "Gemountet"
 section "Mosque-Signage Dateien kopieren"
 mkdir -p "$MOUNT_ROOT/opt/mosque/"{scripts,wifi-portal,brand}
 
-cp "$SCRIPT_DIR/scripts/wifi-setup.sh"    "$MOUNT_ROOT/opt/mosque/scripts/"
-cp "$SCRIPT_DIR/scripts/start-kiosk.sh"   "$MOUNT_ROOT/opt/mosque/scripts/"
-cp "$SCRIPT_DIR/scripts/wifi-watchdog.sh" "$MOUNT_ROOT/opt/mosque/scripts/"
-cp "$SCRIPT_DIR/wifi-portal/portal.py"    "$MOUNT_ROOT/opt/mosque/wifi-portal/"
-cp "$SCRIPT_DIR/services/"*.service       "$MOUNT_ROOT/etc/systemd/system/"
-cp "$SCRIPT_DIR/services/"*.timer         "$MOUNT_ROOT/etc/systemd/system/" 2>/dev/null || true
+cp "$SCRIPT_DIR/scripts/wifi-setup.sh"         "$MOUNT_ROOT/opt/mosque/scripts/"
+cp "$SCRIPT_DIR/scripts/start-kiosk.sh"        "$MOUNT_ROOT/opt/mosque/scripts/"
+cp "$SCRIPT_DIR/scripts/wifi-watchdog.sh"       "$MOUNT_ROOT/opt/mosque/scripts/"
+cp "$SCRIPT_DIR/scripts/display-wrapper.sh"     "$MOUNT_ROOT/opt/mosque/scripts/"
+cp "$SCRIPT_DIR/scripts/command-executor.py"    "$MOUNT_ROOT/opt/mosque/scripts/"
+cp "$SCRIPT_DIR/wifi-portal/portal.py"          "$MOUNT_ROOT/opt/mosque/wifi-portal/"
+cp "$SCRIPT_DIR/services/"*.service             "$MOUNT_ROOT/etc/systemd/system/"
+cp "$SCRIPT_DIR/services/"*.timer               "$MOUNT_ROOT/etc/systemd/system/" 2>/dev/null || true
 chmod +x "$MOUNT_ROOT/opt/mosque/scripts/"*.sh
 
 # CMS-URL eintragen
@@ -229,6 +231,7 @@ apt-get install -y --no-install-recommends \
     dbus-user-session \
     plymouth \
     plymouth-themes \
+    wlr-randr \
     2>/dev/null
 
 apt-get clean
@@ -272,6 +275,7 @@ systemctl enable mosque-portal.service
 systemctl enable mosque-kiosk.service
 systemctl enable mosque-wifi-watchdog.service
 systemctl enable mosque-kiosk-restart.timer
+systemctl enable mosque-commander.service
 systemctl enable avahi-daemon
 
 # Plymouth Boot-Theme aktivieren
@@ -382,12 +386,15 @@ sed -i 's| systemd.run.*||g' /boot/firmware/cmdline.txt
 EOF
 chmod +x "$MOUNT_ROOT/boot/firmware/firstrun.sh"
 
-# firstrun.sh in cmdline.txt eintragen
+# firstrun.sh + consoleblank=0 in cmdline.txt eintragen
 CMDLINE="$MOUNT_ROOT/boot/firmware/cmdline.txt"
 if ! grep -q "firstrun" "$CMDLINE"; then
     sed -i 's/$/ systemd.run=\/boot\/firmware\/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target/' "$CMDLINE"
 fi
-log "First-Boot Script eingerichtet"
+if ! grep -q "consoleblank=0" "$CMDLINE"; then
+    sed -i 's/$/ consoleblank=0/' "$CMDLINE"
+fi
+log "First-Boot Script + consoleblank=0 eingerichtet"
 
 # ── SSH aktivieren (für Wartung) ──────────────────────────────────────────────
 touch "$MOUNT_ROOT/boot/firmware/ssh"

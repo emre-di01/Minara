@@ -4,10 +4,22 @@
 
 CMS_URL="https://mosque.401dev.de/tv"
 LOG="/var/log/mosque-kiosk.log"
+DEVICE_CONF="/boot/firmware/device.json"
 CRASH_COUNT=0
 CRASH_LIMIT=10          # nach 10 Abstürzen innerhalb kurzer Zeit: Reboot
 CRASH_WINDOW=300        # Zeitfenster in Sekunden
 LAST_CRASH_RESET=$(date +%s)
+
+# Orientation aus device.json lesen
+ORIENTATION=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('$DEVICE_CONF'))
+    print(d.get('orientation', 'landscape'))
+except Exception:
+    print('landscape')
+" 2>/dev/null || echo "landscape")
+export ORIENTATION
 
 # Wayland env
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
@@ -53,13 +65,17 @@ CHROMIUM_FLAGS=(
     --autoplay-policy=no-user-gesture-required
 )
 
-log "Kiosk gestartet — $CMS_URL"
+log "Kiosk gestartet — $CMS_URL (orientation: $ORIENTATION)"
 
-# cage startet Wayland + Chromium, bei Absturz automatisch neu
+# CHROMIUM_FLAGS als Env-Variable für display-wrapper.sh
+export CHROMIUM_FLAGS="${CHROMIUM_FLAGS[*]}"
+export CMS_URL
+
+# cage startet Wayland + Chromium via display-wrapper, bei Absturz automatisch neu
 while true; do
     START=$(date +%s)
 
-    cage -- chromium-browser "${CHROMIUM_FLAGS[@]}" "$CMS_URL"
+    cage -- bash /opt/mosque/scripts/display-wrapper.sh
     EXIT_CODE=$?
 
     NOW=$(date +%s)

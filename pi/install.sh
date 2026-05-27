@@ -65,6 +65,7 @@ apt-get install -y --no-install-recommends \
     dbus-user-session \
     plymouth \
     plymouth-themes \
+    wlr-randr \
     2>/dev/null
 
 systemctl disable hostapd dnsmasq 2>/dev/null || true
@@ -92,12 +93,14 @@ mkdir -p "$INSTALL_DIR"/{scripts,wifi-portal}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-install.sh}")" 2>/dev/null && pwd || echo "/tmp/mosque-pi")"
 
 if [ -f "$SCRIPT_DIR/scripts/wifi-setup.sh" ]; then
-    cp "$SCRIPT_DIR/scripts/wifi-setup.sh"      "$INSTALL_DIR/scripts/"
-    cp "$SCRIPT_DIR/scripts/start-kiosk.sh"     "$INSTALL_DIR/scripts/"
-    cp "$SCRIPT_DIR/scripts/wifi-watchdog.sh"   "$INSTALL_DIR/scripts/"
-    cp "$SCRIPT_DIR/wifi-portal/portal.py"      "$INSTALL_DIR/wifi-portal/"
-    cp "$SCRIPT_DIR/services/"*.service         /etc/systemd/system/
-    cp "$SCRIPT_DIR/services/"*.timer           /etc/systemd/system/ 2>/dev/null || true
+    cp "$SCRIPT_DIR/scripts/wifi-setup.sh"          "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/scripts/start-kiosk.sh"         "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/scripts/wifi-watchdog.sh"        "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/scripts/display-wrapper.sh"      "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/scripts/command-executor.py"     "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/wifi-portal/portal.py"           "$INSTALL_DIR/wifi-portal/"
+    cp "$SCRIPT_DIR/services/"*.service              /etc/systemd/system/
+    cp "$SCRIPT_DIR/services/"*.timer                /etc/systemd/system/ 2>/dev/null || true
     log "Dateien aus lokalem Repo kopiert"
 else
     warn "Lade Dateien von GitHub..."
@@ -105,6 +108,8 @@ else
     curl -sSL "$REPO/scripts/wifi-setup.sh"                    -o "$INSTALL_DIR/scripts/wifi-setup.sh"
     curl -sSL "$REPO/scripts/start-kiosk.sh"                   -o "$INSTALL_DIR/scripts/start-kiosk.sh"
     curl -sSL "$REPO/scripts/wifi-watchdog.sh"                 -o "$INSTALL_DIR/scripts/wifi-watchdog.sh"
+    curl -sSL "$REPO/scripts/display-wrapper.sh"               -o "$INSTALL_DIR/scripts/display-wrapper.sh"
+    curl -sSL "$REPO/scripts/command-executor.py"              -o "$INSTALL_DIR/scripts/command-executor.py"
     curl -sSL "$REPO/wifi-portal/portal.py"                    -o "$INSTALL_DIR/wifi-portal/portal.py"
     curl -sSL "$REPO/services/wifi-setup.service"              -o /etc/systemd/system/wifi-setup.service
     curl -sSL "$REPO/services/mosque-portal.service"           -o /etc/systemd/system/mosque-portal.service
@@ -112,6 +117,7 @@ else
     curl -sSL "$REPO/services/mosque-wifi-watchdog.service"    -o /etc/systemd/system/mosque-wifi-watchdog.service
     curl -sSL "$REPO/services/mosque-kiosk-restart.service"    -o /etc/systemd/system/mosque-kiosk-restart.service
     curl -sSL "$REPO/services/mosque-kiosk-restart.timer"      -o /etc/systemd/system/mosque-kiosk-restart.timer
+    curl -sSL "$REPO/services/mosque-commander.service"        -o /etc/systemd/system/mosque-commander.service
     log "Dateien von GitHub geladen"
 fi
 
@@ -153,6 +159,42 @@ if [ -d "$THEME_SRC" ]; then
     fi
 else
     warn "Plymouth-Theme-Quellen nicht gefunden — übersprungen"
+fi
+
+# ── 3c. Brand-Logo: SVG → PNG konvertieren ────────────────────────────────────
+section "Brand-Logo"
+BRAND_SVG="$INSTALL_DIR/brand/logo.svg"
+BRAND_PNG="$INSTALL_DIR/brand/logo.png"
+if [ -f "$BRAND_SVG" ]; then
+    if ! python3 -c "import cairosvg" 2>/dev/null; then
+        info "cairosvg installieren (für SVG→PNG)..."
+        pip3 install --quiet cairosvg 2>/dev/null || warn "cairosvg konnte nicht installiert werden"
+    fi
+    if python3 -c "import cairosvg" 2>/dev/null; then
+        python3 - "$BRAND_SVG" "$BRAND_PNG" << 'PYEOF'
+import sys, re
+import cairosvg
+
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    svg = f.read()
+
+# Background-Rect entfernen
+svg = re.sub(r'<path fill="#FCFCFC" d="M0 0L1024 0L1024 1024L0 1024L0 0Z"/>', '', svg)
+# Standard-Fill weiß
+svg = svg.replace('<svg ', '<svg fill="#FFFFFF" ', 1)
+# Navy → Weiß
+svg = svg.replace('fill="#0D0C4D"', 'fill="#FFFFFF"')
+# Weiße Gegen-Formen → dunkler Hintergrund
+svg = svg.replace('fill="#FCFCFC"', 'fill="#09090b"')
+
+cairosvg.svg2png(bytestring=svg.encode(), write_to=dst,
+                 output_width=512, output_height=512)
+PYEOF
+        log "logo.svg → logo.png konvertiert"
+    else
+        warn "cairosvg nicht verfügbar — SVG-Konvertierung übersprungen"
+    fi
 fi
 
 # ── 4. Pi 4 config.txt ───────────────────────────────────────────────────────
@@ -225,6 +267,10 @@ if [ -f "$CMDLINE" ]; then
     sed -i 's/splash//' "$CMDLINE"
     if ! grep -q "quiet" "$CMDLINE"; then
         sed -i 's/$/ quiet loglevel=1/' "$CMDLINE"
+    fi
+    # DPMS/Screen-Blanking im Kernel deaktivieren
+    if ! grep -q "consoleblank=0" "$CMDLINE"; then
+        sed -i 's/$/ consoleblank=0/' "$CMDLINE"
     fi
     log "cmdline.txt aktualisiert"
 fi
@@ -309,7 +355,8 @@ systemctl enable mosque-portal.service
 systemctl enable mosque-kiosk.service
 systemctl enable mosque-wifi-watchdog.service
 systemctl enable mosque-kiosk-restart.timer
-log "wifi-setup, mosque-portal, mosque-kiosk, wifi-watchdog, nightly-restart aktiviert"
+systemctl enable mosque-commander.service
+log "wifi-setup, mosque-portal, mosque-kiosk, wifi-watchdog, nightly-restart, mosque-commander aktiviert"
 
 # ── Zusammenfassung ───────────────────────────────────────────────────────────
 echo ""

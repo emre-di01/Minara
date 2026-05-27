@@ -137,3 +137,14 @@ export interface AzanConfig {
   /** Pro Gebet individuelle Audio-Datei */
   prayers: Partial<Record<AzanPrayer, AzanPrayerConfig>>
 }
+
+export interface DeviceCommand {
+  id: string
+  hardware_id: string
+  command: 'restart_kiosk' | 'reboot' | 'clear_cache' | 'update_scripts' | 'set_orientation'
+  payload: Record<string, unknown>
+  created_at: string
+  executed_at: string | null
+  result: string | null
+  status: 'pending' | 'done' | 'error'
+}

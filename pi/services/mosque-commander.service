@@ -1,0 +1,16 @@
+[Unit]
+Description=Mosque Signage Remote Command Executor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=python3 /opt/mosque/scripts/command-executor.py
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
