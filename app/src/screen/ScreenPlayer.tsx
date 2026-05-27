@@ -9,7 +9,6 @@ interface Props {
 }
 
 const AZAN_PRAYERS: AzanPrayer[] = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
-const pad = (n: number) => String(n).padStart(2, '0')
 
 export default function ScreenPlayer({ hardwareId }: Props) {
   const [screen, setScreen] = useState<Screen | null>(null)
@@ -169,34 +168,51 @@ function ScreenContent({
     return () => clearTimeout(timer)
   }, [azanConfig?.enabled, prayerSource, cityId])
 
-  // ── Ezan-Trigger: jede Sekunde prüfen ───────────────────────────────────────
+  // ── Ezan-Trigger: gezielter setTimeout statt polling ────────────────────────
+  // Berechnet genau wann das nächste Gebet ist und wartet nur so lange.
+  // Zwischen Gebeten läuft gar kein Timer — null Overhead.
   useEffect(() => {
     if (!azanConfig?.enabled || !prayerTimes) return
 
-    const id = setInterval(() => {
+    let timer: ReturnType<typeof setTimeout>
+
+    function scheduleNext() {
       const now = new Date()
-      const hhmm = `${pad(now.getHours())}:${pad(now.getMinutes())}`
-      const dateKey = now.toISOString().slice(0, 10) // YYYY-MM-DD
+      const dateKey = now.toISOString().slice(0, 10)
 
       for (const prayer of AZAN_PRAYERS) {
-        const prayerTime = prayerTimes[prayer] as string | undefined
-        if (!prayerTime || prayerTime !== hhmm) continue
+        const prayerTime = prayerTimes![prayer] as string | undefined
+        if (!prayerTime) continue
 
+        const [h, m] = prayerTime.split(':').map(Number)
+        const target = new Date(now)
+        target.setHours(h, m, 0, 0)
+
+        // Gebet in der Zukunft und noch nicht heute ausgelöst?
         const triggerKey = `${prayer}-${dateKey}`
-        if (lastAzanRef.current === triggerKey) continue // bereits ausgelöst
+        if (target <= now || lastAzanRef.current === triggerKey) continue
 
-        // Prüfen ob für dieses Gebet ein Audio gesetzt oder Overlay an ist
-        const hasPrayerConfig = azanConfig.prayers?.[prayer]
-        const hasAudio = hasPrayerConfig?.url
-        if (!hasAudio && !azanConfig.overlay) continue
+        // Kein Audio und kein Overlay → überspringen
+        if (!azanConfig!.prayers?.[prayer]?.url && !azanConfig!.overlay) continue
 
-        lastAzanRef.current = triggerKey
-        setActiveAzan(prayer)
-        break
+        const ms = target.getTime() - now.getTime()
+        timer = setTimeout(() => {
+          lastAzanRef.current = triggerKey
+          setActiveAzan(prayer)
+          scheduleNext() // nächstes Gebet einplanen
+        }, ms)
+        return
       }
-    }, 1000)
 
-    return () => clearInterval(id)
+      // Alle Gebete für heute vorbei → kurz nach Mitternacht neu planen
+      const tomorrow = new Date(now)
+      tomorrow.setDate(tomorrow.getDate() + 1)
+      tomorrow.setHours(0, 0, 5, 0) // 00:00:05 — nach dem Mitternachts-Reload
+      timer = setTimeout(scheduleNext, tomorrow.getTime() - now.getTime())
+    }
+
+    scheduleNext()
+    return () => clearTimeout(timer)
   }, [azanConfig, prayerTimes])
 
   return (
