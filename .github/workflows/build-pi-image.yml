@@ -1,0 +1,35 @@
+name: Build Pi 4 Image
+
+on:
+  workflow_dispatch:        # Manuell starten per Klick
+  push:
+    paths:
+      - 'pi/**'             # Automatisch bei Änderungen in pi/
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04   # Echter Ubuntu-Runner mit Loop-Device-Support
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y qemu-user-static binfmt-support \
+            parted e2fsprogs xz-utils wget
+          sudo update-binfmts --enable qemu-aarch64
+
+      - name: Build image
+        run: sudo bash pi/build-image.sh
+        env:
+          CMS_URL: https://mosque.401dev.de/tv
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mosque-signage-pi4
+          path: pi/output/mosque-signage-pi4.img.xz
+          retention-days: 30    # 30 Tage aufbewahren
