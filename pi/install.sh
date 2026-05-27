@@ -151,8 +151,8 @@ if [ -d "$THEME_SRC" ]; then
 
     if command -v plymouth-set-default-theme &>/dev/null; then
         plymouth-set-default-theme minara 2>/dev/null && \
-            update-initramfs -u -k all 2>/dev/null && \
-            log "Plymouth-Theme aktiv: minara" || \
+            update-initramfs -u -k all && \
+            log "Plymouth-Theme aktiv: minara (initramfs aktualisiert)" || \
             warn "Plymouth theme setzen fehlgeschlagen (nicht kritisch)"
     else
         warn "plymouth-set-default-theme nicht gefunden — Theme kopiert aber nicht aktiv"
@@ -262,11 +262,16 @@ log "Pi 4 config.txt konfiguriert"
 section "Boot-Parameter"
 CMDLINE="/boot/firmware/cmdline.txt"
 if [ -f "$CMDLINE" ]; then
-    # Splash entfernen, quiet hinzufügen
-    sed -i 's/quiet//' "$CMDLINE"
-    sed -i 's/splash//' "$CMDLINE"
+    # quiet sicherstellen
     if ! grep -q "quiet" "$CMDLINE"; then
-        sed -i 's/$/ quiet loglevel=1/' "$CMDLINE"
+        sed -i 's/$/ quiet/' "$CMDLINE"
+    fi
+    # splash + plymouth.ignore-serial-consoles:
+    # OHNE splash läuft Plymouth im Textmodus und kann bei Terminate hängen
+    if ! grep -q "splash" "$CMDLINE"; then
+        sed -i 's/quiet/quiet splash plymouth.ignore-serial-consoles/' "$CMDLINE"
+    elif ! grep -q "plymouth.ignore-serial-consoles" "$CMDLINE"; then
+        sed -i 's/$/ plymouth.ignore-serial-consoles/' "$CMDLINE"
     fi
     # DPMS/Screen-Blanking im Kernel deaktivieren
     if ! grep -q "consoleblank=0" "$CMDLINE"; then
@@ -274,6 +279,21 @@ if [ -f "$CMDLINE" ]; then
     fi
     log "cmdline.txt aktualisiert"
 fi
+
+# ── Plymouth-quit Timeout (verhindert ewigen Hang wenn plymouthd nicht startet) ──
+section "Plymouth-Timeouts setzen"
+mkdir -p /etc/systemd/system/plymouth-quit.service.d
+cat > /etc/systemd/system/plymouth-quit.service.d/timeout.conf << 'PLEOF'
+[Service]
+TimeoutSec=10
+PLEOF
+mkdir -p /etc/systemd/system/plymouth-quit-wait.service.d
+cat > /etc/systemd/system/plymouth-quit-wait.service.d/timeout.conf << 'PLEOF'
+[Service]
+TimeoutSec=10
+PLEOF
+systemctl daemon-reload 2>/dev/null || true
+log "Plymouth-Quit Timeout: 10s"
 
 # ── 6. Geräte-ID ─────────────────────────────────────────────────────────────
 section "Geräte-ID"

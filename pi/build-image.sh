@@ -287,10 +287,25 @@ if [ -d "$THEME_DIR" ]; then
     fi
     # Theme als Standard setzen
     plymouth-set-default-theme minara 2>/dev/null || true
-    # Initramfs jetzt aktualisieren — Plymouth muss das Theme beim ersten Boot kennen
-    update-initramfs -u -k all 2>/dev/null || true
+    # Initramfs aktualisieren — Hinweis: in QEMU-Chroot kann dies fehlschlagen.
+    # Deshalb läuft update-initramfs NOCHMALS im firstrun (echte ARM-Hardware, Boot 2+).
+    echo "[chroot] Starte update-initramfs (kann 1–2 Min dauern)..."
+    update-initramfs -u -k all && echo "[chroot] initramfs OK" || echo "[chroot] WARNUNG: update-initramfs fehlgeschlagen — firstrun repariert es"
     echo "[chroot] Plymouth-Theme: minara"
 fi
+
+# Plymouth-quit Timeout: verhindert ewigen Hang wenn plymouthd nicht startet (z.B. Boot 1 mit QEMU-initramfs)
+mkdir -p /etc/systemd/system/plymouth-quit.service.d
+cat > /etc/systemd/system/plymouth-quit.service.d/timeout.conf << 'PLEOF'
+[Service]
+TimeoutSec=10
+PLEOF
+mkdir -p /etc/systemd/system/plymouth-quit-wait.service.d
+cat > /etc/systemd/system/plymouth-quit-wait.service.d/timeout.conf << 'PLEOF'
+[Service]
+TimeoutSec=10
+PLEOF
+echo "[chroot] Plymouth-Quit Timeout: 10s"
 
 # Hardware Watchdog
 echo 'bcm2835-wdt' >> /etc/modules
@@ -364,6 +379,7 @@ cat > "$MOUNT_ROOT/boot/firmware/firstrun.sh" << 'EOF'
 # Läuft einmalig beim allerersten Boot (via minara-firstrun.service)
 # 1. Pi OS First-Boot-Wizard sicher deaktivieren
 # 2. Geräte-ID aus Pi-Seriennummer generieren
+# 3. Plymouth-initramfs auf echter ARM-Hardware neu bauen (Boot 2 → Plymouth funktioniert sauber)
 
 # Sicherheitsnetz: userconfig nochmal deaktivieren (Bookworm-Quirk)
 systemctl disable userconfig 2>/dev/null || true
@@ -378,15 +394,26 @@ if [ ! -f "$DEVICE_CONF" ]; then
     echo "{\"id\": \"pi-$SERIAL\"}" > "$DEVICE_CONF"
 fi
 
+# Plymouth-initramfs auf echter ARM-Hardware regenerieren.
+# Das QEMU-generierte initramfs aus dem Image-Build kann broken sein.
+# Ab Boot 2 ist das initramfs korrekt → plymouth-quit.service hängt nicht mehr.
+if command -v update-initramfs &>/dev/null; then
+    update-initramfs -u -k all 2>/dev/null && \
+        echo "[firstrun] Plymouth initramfs regeneriert (ARM)" || \
+        echo "[firstrun] WARNUNG: update-initramfs fehlgeschlagen"
+fi
+
 # Service nach einmaligem Ausführen deaktivieren
 systemctl disable minara-firstrun.service 2>/dev/null || true
 EOF
 chmod +x "$MOUNT_ROOT/boot/firmware/firstrun.sh"
 
-# Systemd-Service für firstrun — läuft NACH multi-user.target, Plymouth terminiert normal
+# Systemd-Service für firstrun
+# Läuft nach multi-user.target (Plymouth ist dann bereits beendet).
+# update-initramfs auf echter ARM-Hardware → ab Boot 2 ist Plymouth korrekt.
 cat > "$MOUNT_ROOT/etc/systemd/system/minara-firstrun.service" << 'EOF'
 [Unit]
-Description=Minara First-Boot Setup
+Description=Minara First-Boot Setup (Geräte-ID + Plymouth initramfs)
 After=multi-user.target
 ConditionPathExists=/boot/firmware/firstrun.sh
 
@@ -396,6 +423,8 @@ ExecStart=/boot/firmware/firstrun.sh
 RemainAfterExit=no
 StandardOutput=journal
 StandardError=journal
+# update-initramfs kann 2–3 Min dauern auf langsamer SD-Karte
+TimeoutSec=300
 
 [Install]
 WantedBy=multi-user.target
