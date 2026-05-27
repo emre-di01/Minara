@@ -4,11 +4,13 @@
 
 | | |
 |---|---|
-| **Empfohlen** | Raspberry Pi 4 (2 GB+) |
-| **Minimal** | Raspberry Pi 3B+ |
-| **Display** | HDMI-Monitor oder TV |
-| **Strom** | USB-C 5V/3A Netzteil |
-| **Speicher** | microSD 16 GB+ (Class 10) |
+| **Getestet** | Raspberry Pi 4 (2 GB / 4 GB / 8 GB) |
+| **Display** | HDMI0 (erster HDMI-Port, näher am USB-C) |
+| **Strom** | USB-C 5V/3A Netzteil (original Pi 4 Netzteil empfohlen) |
+| **Speicher** | microSD 16 GB+ (Class 10 / A1) |
+| **OS** | Raspberry Pi OS Lite **Bookworm 64-bit** (kein Desktop nötig) |
+
+> ⚠️ HDMI **vor** dem Einschalten anschließen — Pi 4 erkennt den Monitor sonst nicht.
 
 ---
 

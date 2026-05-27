@@ -1,17 +1,23 @@
 [Unit]
-Description=Mosque Signage Kiosk
-After=network-online.target graphical.target
+Description=Mosque Signage Kiosk (Pi 4 Wayland)
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=kiosk
 Group=kiosk
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/kiosk/.Xauthority
-ExecStartPre=/bin/sleep 3
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty
+
+Environment=XDG_RUNTIME_DIR=/run/user/1001
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus
+
+ExecStartPre=/bin/sleep 2
 ExecStart=/opt/mosque/scripts/start-kiosk.sh
+
 Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target

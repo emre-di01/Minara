@@ -1,41 +1,56 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Mosque Signage — Raspberry Pi Setup Script
-# Getestet auf: Raspberry Pi OS Lite (Bookworm, 64-bit)
+# Mosque Signage — Raspberry Pi 4 Setup Script
+# Getestet auf: Raspberry Pi OS Lite Bookworm (64-bit)
 #
-# Ausführen:
+# Ausführen nach SSH-Login:
 #   curl -sSL https://raw.githubusercontent.com/emre-di01/mosque-signage/main/pi/install.sh | sudo bash
-#   oder: sudo bash install.sh
+#   oder lokal: sudo bash pi/install.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
-# ── Konfiguration ─────────────────────────────────────────────────────────────
 CMS_URL="https://mosque.401dev.de/tv"
 INSTALL_DIR="/opt/mosque"
 KIOSK_USER="kiosk"
+KIOSK_UID=1001
 DEVICE_CONF="/boot/firmware/device.json"
+CONFIG_TXT="/boot/firmware/config.txt"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-log()  { echo -e "${GREEN}[✓]${NC} $*"; }
-warn() { echo -e "${YELLOW}[!]${NC} $*"; }
-err()  { echo -e "${RED}[✗]${NC} $*"; exit 1; }
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+log()     { echo -e "${GREEN}[✓]${NC} $*"; }
+info()    { echo -e "${BLUE}[→]${NC} $*"; }
+warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
+err()     { echo -e "${RED}[✗]${NC} $*"; exit 1; }
+section() { echo -e "\n${BLUE}── $* ──${NC}"; }
 
 [ "$(id -u)" -eq 0 ] || err "Bitte mit sudo ausführen: sudo bash install.sh"
 
-log "=== Mosque Signage Pi Setup ==="
+echo ""
+echo -e "${GREEN}╔══════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   Mosque Signage — Pi 4 Setup        ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
+echo ""
 
-# ── 1. System-Pakete ──────────────────────────────────────────────────────────
-log "Pakete installieren..."
+# ── Raspberry Pi 4 prüfen ────────────────────────────────────────────────────
+section "Hardware prüfen"
+MODEL=$(cat /proc/device-tree/model 2>/dev/null || echo "unknown")
+info "Modell: $MODEL"
+if ! echo "$MODEL" | grep -qi "Raspberry Pi 4\|Raspberry Pi 5"; then
+    warn "Nicht auf Pi 4 getestet — Fortfahren auf eigene Gefahr"
+fi
+
+# ── 1. Pakete installieren ────────────────────────────────────────────────────
+section "Pakete installieren"
 apt-get update -qq
+
+# Wayland + cage (minimaler Kiosk-Compositor für Pi 4)
 apt-get install -y --no-install-recommends \
     chromium-browser \
-    xserver-xorg-core \
-    xserver-xorg-input-all \
-    xserver-xorg-video-all \
-    x11-xserver-utils \
-    xinit \
-    openbox \
+    cage \
+    wayland-protocols \
+    libwayland-client0 \
+    xwayland \
     hostapd \
     dnsmasq \
     wpasupplicant \
@@ -47,149 +62,194 @@ apt-get install -y --no-install-recommends \
     avahi-daemon \
     avahi-utils \
     libnss-mdns \
+    dbus-user-session \
     2>/dev/null
 
 systemctl disable hostapd dnsmasq 2>/dev/null || true
+log "Pakete installiert"
 
 # ── 2. Kiosk-User anlegen ─────────────────────────────────────────────────────
-log "Kiosk-User anlegen..."
+section "Kiosk-User"
 if ! id "$KIOSK_USER" &>/dev/null; then
-    useradd -m -s /bin/bash "$KIOSK_USER"
-fi
-usermod -aG video,audio,input,render,netdev "$KIOSK_USER"
-
-# ── 3. Dateien kopieren ───────────────────────────────────────────────────────
-log "Dateien installieren nach $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR"/{scripts,wifi-portal,services}
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-if [ -d "$SCRIPT_DIR/scripts" ]; then
-    cp -r "$SCRIPT_DIR/scripts/"*    "$INSTALL_DIR/scripts/"
-    cp -r "$SCRIPT_DIR/wifi-portal/" "$INSTALL_DIR/"
-    cp -r "$SCRIPT_DIR/services/"*   /etc/systemd/system/
+    useradd -m -u $KIOSK_UID -s /bin/bash "$KIOSK_USER"
+    log "User '$KIOSK_USER' erstellt (UID $KIOSK_UID)"
 else
-    # Direkt von GitHub laden (wenn via curl ausgeführt)
-    REPO="https://raw.githubusercontent.com/emre-di01/mosque-signage/main/pi"
+    KIOSK_UID=$(id -u "$KIOSK_USER")
+    log "User '$KIOSK_USER' existiert bereits (UID $KIOSK_UID)"
+fi
+usermod -aG video,audio,input,render,netdev,tty "$KIOSK_USER"
+
+# XDG_RUNTIME_DIR für kiosk-User anlegen
+mkdir -p "/run/user/$KIOSK_UID"
+chown "$KIOSK_USER:$KIOSK_USER" "/run/user/$KIOSK_UID"
+chmod 700 "/run/user/$KIOSK_UID"
+
+# ── 3. Dateien installieren ───────────────────────────────────────────────────
+section "Dateien installieren"
+mkdir -p "$INSTALL_DIR"/{scripts,wifi-portal}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-install.sh}")" 2>/dev/null && pwd || echo "/tmp/mosque-pi")"
+
+if [ -f "$SCRIPT_DIR/scripts/wifi-setup.sh" ]; then
+    cp "$SCRIPT_DIR/scripts/wifi-setup.sh"    "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/scripts/start-kiosk.sh"   "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/wifi-portal/portal.py"    "$INSTALL_DIR/wifi-portal/"
+    cp "$SCRIPT_DIR/services/"*.service       /etc/systemd/system/
+    log "Dateien aus lokalem Repo kopiert"
+else
     warn "Lade Dateien von GitHub..."
-    curl -sSL "$REPO/scripts/wifi-setup.sh"   -o "$INSTALL_DIR/scripts/wifi-setup.sh"
-    curl -sSL "$REPO/scripts/start-kiosk.sh"  -o "$INSTALL_DIR/scripts/start-kiosk.sh"
-    curl -sSL "$REPO/wifi-portal/portal.py"   -o "$INSTALL_DIR/wifi-portal/portal.py"
-    curl -sSL "$REPO/services/wifi-setup.service"   -o /etc/systemd/system/wifi-setup.service
+    REPO="https://raw.githubusercontent.com/emre-di01/mosque-signage/main/pi"
+    curl -sSL "$REPO/scripts/wifi-setup.sh"          -o "$INSTALL_DIR/scripts/wifi-setup.sh"
+    curl -sSL "$REPO/scripts/start-kiosk.sh"         -o "$INSTALL_DIR/scripts/start-kiosk.sh"
+    curl -sSL "$REPO/wifi-portal/portal.py"          -o "$INSTALL_DIR/wifi-portal/portal.py"
+    curl -sSL "$REPO/services/wifi-setup.service"    -o /etc/systemd/system/wifi-setup.service
     curl -sSL "$REPO/services/mosque-portal.service" -o /etc/systemd/system/mosque-portal.service
     curl -sSL "$REPO/services/mosque-kiosk.service"  -o /etc/systemd/system/mosque-kiosk.service
+    log "Dateien von GitHub geladen"
 fi
 
 chmod +x "$INSTALL_DIR/scripts/"*.sh
+sed -i "s|CMS_URL=.*|CMS_URL=\"$CMS_URL\"|" "$INSTALL_DIR/scripts/start-kiosk.sh"
 chown -R "$KIOSK_USER:$KIOSK_USER" "$INSTALL_DIR"
 
-# CMS-URL in Kiosk-Script eintragen
-sed -i "s|CMS_URL=.*|CMS_URL=\"$CMS_URL\"|" "$INSTALL_DIR/scripts/start-kiosk.sh"
+# ── 4. Pi 4 config.txt ───────────────────────────────────────────────────────
+section "Pi 4 Display-Konfiguration"
 
-# ── 4. Geräte-ID generieren ──────────────────────────────────────────────────
-log "Geräte-ID generieren..."
+# Backup
+cp "$CONFIG_TXT" "${CONFIG_TXT}.bak" 2>/dev/null || true
+
+# Pi 4 Wayland/KMS Setup
+python3 - << 'PYEOF'
+import re, os
+
+conf = "/boot/firmware/config.txt"
+with open(conf) as f:
+    content = f.read()
+
+settings = {
+    # KMS-Treiber (Pflicht für Wayland auf Pi 4)
+    "dtoverlay=vc4-kms-v3d":    True,
+    # HDMI immer aktiv (auch ohne Monitor beim Start)
+    "hdmi_force_hotplug=1":     True,
+    # HDMI0 maximale Auflösung erzwingen
+    "hdmi_drive=2":             True,
+    # GPU-Speicher für Hardware-Dekodierung (Pi 4)
+    "gpu_mem=128":              True,
+    # Maximale Prozessor-Performance
+    "arm_boost=1":              True,
+    # Kein Regenbogen-Splash
+    "disable_splash=1":         True,
+    # fkms entfernen (veraltet, führt zu Konflikten)
+    "dtoverlay=vc4-fkms-v3d":   False,
+}
+
+lines = content.split('\n')
+result = []
+skip_keys = {k.split('=')[0] for k, v in settings.items() if not v}
+
+for line in lines:
+    stripped = line.strip()
+    # Zeilen entfernen die wir überschreiben
+    should_skip = any(
+        stripped == k or stripped.startswith(k.split('=')[0] + '=')
+        for k in list(settings.keys()) + list(skip_keys)
+    )
+    if not should_skip:
+        result.append(line)
+
+# Pi 4 Block hinzufügen
+result.append('')
+result.append('[pi4]')
+for k, v in settings.items():
+    if v:
+        result.append(k)
+result.append('[all]')
+
+with open(conf, 'w') as f:
+    f.write('\n'.join(result))
+
+print(f"  config.txt aktualisiert")
+PYEOF
+
+log "Pi 4 config.txt konfiguriert"
+
+# ── 5. Kernel-Parameter (schneller Boot, kein Splash) ─────────────────────────
+section "Boot-Parameter"
+CMDLINE="/boot/firmware/cmdline.txt"
+if [ -f "$CMDLINE" ]; then
+    # Splash entfernen, quiet hinzufügen
+    sed -i 's/quiet//' "$CMDLINE"
+    sed -i 's/splash//' "$CMDLINE"
+    if ! grep -q "quiet" "$CMDLINE"; then
+        sed -i 's/$/ quiet loglevel=1/' "$CMDLINE"
+    fi
+    log "cmdline.txt aktualisiert"
+fi
+
+# ── 6. Geräte-ID ─────────────────────────────────────────────────────────────
+section "Geräte-ID"
 if [ ! -f "$DEVICE_CONF" ]; then
-    DEVICE_ID="pi-$(cat /proc/cpuinfo | grep Serial | awk '{print $3}' | tail -c 9)"
-    [ "$DEVICE_ID" = "pi-" ] && DEVICE_ID="pi-$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 12)"
+    SERIAL=$(cat /proc/cpuinfo | grep Serial | awk '{print $3}' | tail -c 9 | tr -d '[:space:]')
+    if [ -z "$SERIAL" ] || [ "$SERIAL" = "0000000000000000" ]; then
+        SERIAL=$(cat /proc/sys/kernel/random/uuid | tr -d '-' | head -c 12)
+    fi
+    DEVICE_ID="pi-$SERIAL"
     mkdir -p "$(dirname "$DEVICE_CONF")"
     echo "{\"id\": \"$DEVICE_ID\"}" > "$DEVICE_CONF"
-    log "Geräte-ID: $DEVICE_ID"
+    log "Geräte-ID generiert: $DEVICE_ID"
 else
-    log "Geräte-ID bereits vorhanden: $(python3 -c "import json; print(json.load(open('$DEVICE_CONF'))['id'])")"
+    DEVICE_ID=$(python3 -c "import json; print(json.load(open('$DEVICE_CONF'))['id'])" 2>/dev/null || echo "?")
+    log "Geräte-ID bereits vorhanden: $DEVICE_ID"
 fi
 
-# ── 5. X11 Autostart für kiosk-User ─────────────────────────────────────────
-log "X11 Kiosk autostart konfigurieren..."
-
-# X11 ohne Display-Manager starten
-cat > /etc/systemd/system/mosque-x11.service << 'EOF'
-[Unit]
-Description=Mosque Signage X11
-After=systemd-logind.service
-
-[Service]
-User=kiosk
-Group=kiosk
-PAMName=login
-TTYPath=/dev/tty1
-StandardInput=tty
-Environment=XDG_RUNTIME_DIR=/run/user/1001
-ExecStart=/usr/bin/startx /opt/mosque/scripts/start-kiosk.sh -- :0 vt1 -nolisten tcp
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Openbox Autostart (kein weiteres WM-Overhead)
-mkdir -p /home/$KIOSK_USER/.config/openbox
-cat > /home/$KIOSK_USER/.config/openbox/autostart << EOF
-# Kiosk wird direkt von start-kiosk.sh aufgerufen
-EOF
-chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.config
-
-# ── 6. Bildschirm-Einstellungen ───────────────────────────────────────────────
-log "Display-Einstellungen (kein Screensaver)..."
-cat > /etc/X11/xorg.conf.d/10-blanking.conf << 'EOF'
-Section "ServerFlags"
-  Option "StandbyTime" "0"
-  Option "SuspendTime" "0"
-  Option "OffTime"     "0"
-  Option "BlankTime"   "0"
-EndSection
-EOF
-
-# HDMI immer an (auch ohne Monitor beim Start)
-if ! grep -q "hdmi_force_hotplug" /boot/firmware/config.txt 2>/dev/null; then
-    echo "hdmi_force_hotplug=1" >> /boot/firmware/config.txt
-fi
-
-# ── 7. Avahi (mosque-screen.local) ───────────────────────────────────────────
-log "mDNS Hostname konfigurieren..."
+# ── 7. mDNS / Hostname ───────────────────────────────────────────────────────
+section "Hostname & mDNS"
 hostnamectl set-hostname mosque-screen 2>/dev/null || hostname mosque-screen
 echo "mosque-screen" > /etc/hostname
-sed -i 's/127\.0\.1\.1.*/127.0.1.1\tmosque-screen/' /etc/hosts || \
-    echo "127.0.1.1 mosque-screen" >> /etc/hosts
-
+grep -q "mosque-screen" /etc/hosts || echo "127.0.1.1 mosque-screen" >> /etc/hosts
 systemctl enable avahi-daemon 2>/dev/null || true
+log "Hostname: mosque-screen (mosque-screen.local)"
 
-# ── 8. Systemd Services aktivieren ───────────────────────────────────────────
-log "Services aktivieren..."
-systemctl daemon-reload
-systemctl enable wifi-setup.service
-systemctl enable mosque-portal.service
-systemctl enable mosque-x11.service
-
-# Auto-Login auf tty1 (für startx)
+# ── 8. Auto-Login auf tty1 ───────────────────────────────────────────────────
+section "Auto-Login"
 mkdir -p /etc/systemd/system/getty@tty1.service.d/
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << EOF
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin $KIOSK_USER --noclear %I \$TERM
 EOF
+log "Auto-Login für '$KIOSK_USER' auf tty1"
 
-# ── 9. Zusammenfassung ────────────────────────────────────────────────────────
+# ── 9. Systemd-Lingering (XDG_RUNTIME_DIR beim Boot) ─────────────────────────
+loginctl enable-linger "$KIOSK_USER" 2>/dev/null || true
+
+# ── 10. Services aktivieren ───────────────────────────────────────────────────
+section "Services aktivieren"
+systemctl daemon-reload
+systemctl enable wifi-setup.service
+systemctl enable mosque-portal.service
+systemctl enable mosque-kiosk.service
+log "wifi-setup, mosque-portal, mosque-kiosk aktiviert"
+
+# ── Zusammenfassung ───────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}════════════════════════════════════════${NC}"
-echo -e "${GREEN} Setup abgeschlossen!${NC}"
-echo -e "${GREEN}════════════════════════════════════════${NC}"
+echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   Setup abgeschlossen! ✓                         ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
-echo " CMS-URL:    $CMS_URL"
-DEVICE_ID=$(python3 -c "import json; print(json.load(open('$DEVICE_CONF'))['id'])" 2>/dev/null || echo "?")
-echo " Geräte-ID:  $DEVICE_ID"
+echo -e "  CMS-URL:    ${BLUE}$CMS_URL${NC}"
+echo -e "  Geräte-ID:  ${BLUE}$DEVICE_ID${NC}"
+echo -e "  Hostname:   ${BLUE}mosque-screen.local${NC}"
 echo ""
-echo " Nach dem Neustart:"
+echo "  Nach dem Neustart:"
 echo "  1. Pi erstellt Hotspot: MosqueScreen-XXXXX (offen, kein Passwort)"
-echo "  2. Mit Handy verbinden → Browser → 192.168.4.1:8080"
-echo "  3. WLAN-Netz eingeben → Pi verbindet sich"
+echo "  2. Mit Handy verbinden → Browser → http://192.168.4.1:8080"
+echo "  3. Heimnetz auswählen + ggf. Passwort → Verbinden"
 echo "  4. Kiosk startet → Pairing-Code im CMS eingeben"
 echo ""
-echo " WiFi später ändern: http://mosque-screen.local:8080"
+echo -e "  WiFi später ändern: ${BLUE}http://mosque-screen.local:8080${NC}"
 echo ""
 
-read -p "Jetzt neu starten? (j/N) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Jj]$ ]]; then
+read -rp "  Jetzt neu starten? (j/N) " REPLY
+if [[ "$REPLY" =~ ^[Jj]$ ]]; then
     reboot
 fi
