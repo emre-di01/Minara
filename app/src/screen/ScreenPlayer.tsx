@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { getPrayerTimes } from '../lib/prayertimes'
 import type { AzanConfig, AzanPrayer, MosqueProfile, Playlist, PrayerSource, PrayerTimes, Screen, ScheduleEntry, Slide, TickerOverlay } from '../types'
 import SlideRenderer from '../slides/SlideRenderer'
+import { loadScreenConfig, saveScreenConfig } from '../lib/offline-cache'
 
 interface Props {
   hardwareId: string
@@ -15,21 +16,48 @@ export default function ScreenPlayer({ hardwareId }: Props) {
   const [playlist, setPlaylist] = useState<Playlist | null>(null)
   const [profile, setProfile] = useState<MosqueProfile | null>(null)
   const playlistIdRef = React.useRef<string | null>(null)
+  // Merkt ob aktuelle Daten aus Online-Quelle stammen (für Cache-Speicherung)
+  const loadedOnlineRef = useRef(false)
 
   async function fetchPlaylist(playlistId: string) {
     const { data } = await supabase.from('playlists').select('*').eq('id', playlistId).single()
     if (data) setPlaylist(data as Playlist)
   }
 
+  // Cache speichern sobald screen + playlist aus Online-Quelle vollständig sind
+  useEffect(() => {
+    if (!loadedOnlineRef.current || !screen || !playlist) return
+    saveScreenConfig(hardwareId, { screen, playlist, profile })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen?.id, playlist?.id, profile?.user_id])
+
   useEffect(() => {
     async function load() {
-      const { data: screenData } = await supabase
-        .from('screens')
-        .select('*')
-        .eq('hardware_id', hardwareId)
-        .single()
+      // 3-Sekunden-Timeout: bei Supabase-Fehler oder Netz-Ausfall sofort auf Cache zurückfallen
+      let screenData: Screen | null = null
+      try {
+        const result = await Promise.race([
+          supabase.from('screens').select('*').eq('hardware_id', hardwareId).single(),
+          new Promise<{ data: null }>((resolve) =>
+            setTimeout(() => resolve({ data: null }), 3000)
+          ),
+        ]) as { data: Screen | null }
+        screenData = result.data
+      } catch { /* Netzwerkfehler */ }
 
-      if (!screenData) return
+      if (!screenData) {
+        // Offline-Fallback: letzten bekannten Zustand aus IndexedDB laden
+        const cached = await loadScreenConfig(hardwareId)
+        if (cached) {
+          setScreen(cached.screen)
+          setProfile(cached.profile)
+          setPlaylist(cached.playlist)
+          playlistIdRef.current = cached.playlist?.id ?? null
+        }
+        return
+      }
+
+      loadedOnlineRef.current = true
       setScreen(screenData as Screen)
 
       supabase.from('mosque_profiles').select('*').eq('user_id', screenData.owner_id).maybeSingle()

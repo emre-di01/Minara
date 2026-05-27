@@ -1,7 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MosqueProfile, Slide, PrayerTheme, PrayerSource, PrayerMethod } from '../types'
 import { UI, QURAN_EDITION, type LangCode } from '../lib/i18n'
 import { getDailyContent, getDailyPrayerTimes } from '../lib/awqatsalah'
+import {
+  addHadithToPool, getHadithFromPool,
+  addAyahToPool, getAyahFromPool,
+  saveRss, loadRss,
+  type HadithItem, type AyahItem, type RssCachedItem,
+} from '../lib/offline-cache'
 import PrayerTimesSlide, { type ClockStyle, type PrayerOffsets } from './PrayerTimesSlide'
 import WeatherSlide from './WeatherSlide'
 import EventsSlide, { type EventsTheme } from './EventsSlide'
@@ -293,16 +299,45 @@ function extractImage(item: RssItem): string | null {
 }
 
 function RssSlide({ url, layout, lang = 'de' }: { url: string; layout: string; lang?: string }) {
-  const [items, setItems] = useState<RssItem[]>([])
-  const [idx,   setIdx]   = useState(0)
+  const [items, setItems]   = useState<RssItem[]>([])
+  const [idx,   setIdx]     = useState(0)
+  const [stale, setStale]   = useState(false)  // gecachte Daten (visuell noch nicht genutzt)
+  void stale  // wird in zukünftigem UI-Indikator verwendet
   const ui = UI[lang as LangCode] ?? UI.de
 
   useEffect(() => {
     if (!url) return
-    fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`)
-      .then(r => r.json())
-      .then(d => { if (d.status === 'ok') setItems(d.items) })
-      .catch(() => {})
+    let active = true
+
+    async function load() {
+      // 1. Cache sofort laden — Anzeige ohne Wartezeit
+      const cached = await loadRss(url)
+      if (cached?.items.length && active) {
+        setItems(cached.items as RssItem[])
+        setStale(true)
+      }
+
+      // 2. Fresh fetch versuchen (nur wenn online)
+      if (!navigator.onLine) return
+      try {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 8000)
+        const r = await fetch(
+          `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`,
+          { signal: controller.signal }
+        )
+        clearTimeout(timeout)
+        const d = await r.json()
+        if (d.status === 'ok' && active) {
+          setItems(d.items)
+          setStale(false)
+          await saveRss(url, d.items as RssCachedItem[])
+        }
+      } catch { /* Timeout oder Netzfehler — Cache bleibt aktiv */ }
+    }
+
+    load()
+    return () => { active = false }
   }, [url])
 
   useEffect(() => {
@@ -311,7 +346,7 @@ function RssSlide({ url, layout, lang = 'de' }: { url: string; layout: string; l
     return () => clearInterval(id)
   }, [items.length])
 
-  if (!items.length) return <Placeholder label="RSS wird geladen…" />
+  if (!items.length) return <Placeholder label={navigator.onLine ? 'RSS wird geladen…' : 'Keine Verbindung'} />
 
   const item  = items[idx]
   const image = extractImage(item)
@@ -406,11 +441,34 @@ function HadithSlide({ theme }: { theme: string }) {
   const [hadith, setHadith] = useState<HadithData | null>(null)
   const p = HADITH_PALETTES[theme] ?? HADITH_PALETTES.forest
   const isWarm = theme === 'warm'
+  const fetchedRef = useRef(false)
 
   useEffect(() => {
-    getDailyContent()
-      .then(d => setHadith({ text: stripQuotes(d.hadith), source: d.hadithSource }))
-      .catch(() => {})
+    let active = true
+
+    async function load() {
+      // 1. Sofort aus Pool laden (Hardcoded-Fallbacks immer verfügbar)
+      const cached = await getHadithFromPool()
+      if (active) setHadith({ text: cached.text, source: cached.source })
+
+      // 2. Fresh fetch mit 8s Timeout
+      if (!navigator.onLine || fetchedRef.current) return
+      try {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 8000)
+        const d = await getDailyContent()
+        clearTimeout(timeout)
+        if (active && d.hadith) {
+          const item: HadithItem = { text: stripQuotes(d.hadith), source: d.hadithSource }
+          fetchedRef.current = true
+          setHadith(item)
+          await addHadithToPool(item)  // Pool für Offline-Betrieb anreichern
+        }
+      } catch { /* Timeout — gecachte Version bleibt */ }
+    }
+
+    load()
+    return () => { active = false }
   }, [])
 
   const containerStyle = isWarm ? {
@@ -471,16 +529,41 @@ function QuranSlide({ lang, theme }: { lang: LangCode; theme: string }) {
   const ui = UI[lang] ?? UI.de
 
   useEffect(() => {
-    const edition = QURAN_EDITION[lang] ?? QURAN_EDITION['en']!
-    const randomRef = Math.floor(Math.random() * 6236) + 1
-    fetch(`https://api.alquran.cloud/v1/ayah/${randomRef}/editions/quran-simple,${edition}`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.code !== 200) return
+    let active = true
+
+    async function load() {
+      // 1. Sofort aus Pool laden (Fallback-Ayah immer verfügbar)
+      const cached = await getAyahFromPool(lang)
+      if (active) setAyah(cached)
+
+      // 2. Fresh fetch mit 8s Timeout
+      if (!navigator.onLine) return
+      try {
+        const edition = QURAN_EDITION[lang] ?? QURAN_EDITION['en']!
+        const randomRef = Math.floor(Math.random() * 6236) + 1
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 8000)
+        const r = await fetch(
+          `https://api.alquran.cloud/v1/ayah/${randomRef}/editions/quran-simple,${edition}`,
+          { signal: controller.signal }
+        )
+        clearTimeout(timeout)
+        const d = await r.json()
+        if (d.code !== 200 || !active) return
         const [arabic, translated] = d.data
-        setAyah({ arabic: arabic.text, translation: translated.text, surah: arabic.surah.englishName, ayah: arabic.numberInSurah })
-      })
-      .catch(() => {})
+        const item: AyahItem = {
+          arabic: arabic.text,
+          translation: translated.text,
+          surah: arabic.surah.englishName,
+          ayah: arabic.numberInSurah,
+        }
+        setAyah(item)
+        await addAyahToPool(lang, item)  // Pool anreichern
+      } catch { /* Timeout — gecachte Version bleibt */ }
+    }
+
+    load()
+    return () => { active = false }
   }, [lang])
 
   return (

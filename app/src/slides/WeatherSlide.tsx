@@ -1,4 +1,5 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import { loadWeather, saveWeather, WEATHER_TTL } from '../lib/offline-cache'
 
 // ─── Types & Data ─────────────────────────────────────────────────────────────
 
@@ -251,10 +252,12 @@ function Particles({ category }: { category: WeatherCategory }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function WeatherSlide({ city, layout }: { city: string; layout: string }) {
-  const [data,   setData]   = useState<WeatherNow | null>(null)
-  const [daily,  setDaily]  = useState<DailyDay[]>([])
-  const [imgUrl, setImgUrl] = useState<string | null>(null)
-  const [imgOk,  setImgOk]  = useState(false)
+  const [data,      setData]      = useState<WeatherNow | null>(null)
+  const [daily,     setDaily]     = useState<DailyDay[]>([])
+  const [imgUrl,    setImgUrl]    = useState<string | null>(null)
+  const [imgOk,     setImgOk]     = useState(false)
+  const [staleTs,   setStaleTs]   = useState<number | null>(null) // != null → gecachte Daten
+  const fetchedRef  = useRef(false)
 
   const hour = new Date().getHours()
 
@@ -263,41 +266,67 @@ export default function WeatherSlide({ city, layout }: { city: string; layout: s
     let active = true
 
     async function load() {
+      // 1. Cache sofort laden — Anzeige ohne Wartezeit
+      const cached = await loadWeather(city)
+      if (cached && active) {
+        setData(cached.now)
+        setDaily(cached.daily)
+        setStaleTs(cached.ts)
+      }
+
+      // 2. Fresh fetch — nur wenn online
+      if (!navigator.onLine) return
       try {
+        const controller = new AbortController()
+        const geoTimeout = setTimeout(() => controller.abort(), 8000)
         const geo = await fetch(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&format=json`
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&format=json`,
+          { signal: controller.signal }
         ).then(r => r.json())
+        clearTimeout(geoTimeout)
+
         if (!geo.results?.length || !active) return
         const { latitude: lat, longitude: lon, name } = geo.results[0]
 
+        const wCtrl = new AbortController()
+        const wTimeout = setTimeout(() => wCtrl.abort(), 8000)
         const w = await fetch(
           `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
           `&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code` +
-          `&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=5`
+          `&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=5`,
+          { signal: wCtrl.signal }
         ).then(r => r.json())
+        clearTimeout(wTimeout)
 
         if (!active) return
+
         if (w.current) {
-          setData({
+          const now: WeatherNow = {
             temp:      Math.round(w.current.temperature_2m),
             feelsLike: Math.round(w.current.apparent_temperature),
             humidity:  Math.round(w.current.relative_humidity_2m),
             windspeed: Math.round(w.current.wind_speed_10m),
             code:      w.current.weather_code ?? 0,
             name,
-          })
-        }
-        if (w.daily?.time) {
-          setDaily(w.daily.time.slice(0, 5).map((date: string, i: number) => ({
-            date,
-            code:    w.daily.weather_code[i],
-            tempMax: Math.round(w.daily.temperature_2m_max[i]),
-            tempMin: Math.round(w.daily.temperature_2m_min[i]),
-          })))
+          }
+          const newDaily: DailyDay[] = w.daily?.time
+            ? w.daily.time.slice(0, 5).map((date: string, i: number) => ({
+                date,
+                code:    w.daily.weather_code[i],
+                tempMax: Math.round(w.daily.temperature_2m_max[i]),
+                tempMin: Math.round(w.daily.temperature_2m_min[i]),
+              }))
+            : []
+
+          setData(now)
+          setDaily(newDaily)
+          setStaleTs(null) // Live-Daten — kein Stale-Indikator
+          fetchedRef.current = true
+          await saveWeather(city, { now, daily: newDaily })
         }
 
-        // City photo via Wikipedia REST API (free, no key, CORS-enabled)
-        if (layout === 'cinematic' && active) {
+        // City photo via Wikipedia (nur cinematic, nur einmal)
+        if (layout === 'cinematic' && active && !fetchedRef.current) {
           try {
             const wiki = await fetch(
               `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(name)}`,
@@ -305,9 +334,9 @@ export default function WeatherSlide({ city, layout }: { city: string; layout: s
             ).then(r => r.json())
             const src = wiki.originalimage?.source ?? wiki.thumbnail?.source ?? null
             if (src && active) setImgUrl(src)
-          } catch { /* no photo — gradient fallback */ }
+          } catch { /* kein Foto — Gradient-Fallback */ }
         }
-      } catch { /* silent */ }
+      } catch { /* Timeout oder offline — Cache bleibt aktiv */ }
     }
 
     load()
@@ -317,15 +346,24 @@ export default function WeatherSlide({ city, layout }: { city: string; layout: s
 
   // ── Loading / empty ──
   if (!city || !data) {
+    // Nach 10s ohne Daten: Offline-Hinweis statt endlosem Spinner
     return (
       <div className="h-screen w-screen flex items-center justify-center"
         style={{ background: 'linear-gradient(170deg,#060d1a 0%,#0c1929 50%,#060d1a 100%)' }}>
         {!city
           ? <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: '1.1rem' }}>Keine Stadt konfiguriert</span>
-          : <div className="w-10 h-10 border-2 border-white/10 border-t-white/50 rounded-full animate-spin" />}
+          : <div className="flex flex-col items-center gap-4">
+              <div className="w-10 h-10 border-2 border-white/10 border-t-white/50 rounded-full animate-spin" />
+              {!navigator.onLine && (
+                <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.85rem' }}>Keine Verbindung</span>
+              )}
+            </div>}
       </div>
     )
   }
+
+  // Stale-Indikator: nur anzeigen wenn Daten älter als TTL
+  const isStale = staleTs !== null && (Date.now() - staleTs) > WEATHER_TTL
 
   const wmo      = WMO[data.code] ?? { label: '', emoji: '🌡️', category: 'cloudy' as WeatherCategory }
   const cat      = wmo.category
@@ -369,6 +407,13 @@ export default function WeatherSlide({ city, layout }: { city: string; layout: s
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
           <Particles category={cat} />
         </div>
+
+        {/* Stale-Indikator: Daten > 3h alt */}
+        {isStale && (
+          <div className="absolute z-20" style={{ top: '2vh', right: '4vw', color: 'rgba(255,255,255,0.3)', fontSize: '0.7rem', letterSpacing: '0.1em' }}>
+            ⚠ {new Date(staleTs!).toLocaleTimeString('de', { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        )}
 
         {/* City name — top left */}
         <div className="absolute z-10 flex items-center gap-3" style={{ top: '3vh', left: '5vw' }}>
