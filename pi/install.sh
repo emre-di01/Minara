@@ -90,20 +90,26 @@ mkdir -p "$INSTALL_DIR"/{scripts,wifi-portal}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-install.sh}")" 2>/dev/null && pwd || echo "/tmp/mosque-pi")"
 
 if [ -f "$SCRIPT_DIR/scripts/wifi-setup.sh" ]; then
-    cp "$SCRIPT_DIR/scripts/wifi-setup.sh"    "$INSTALL_DIR/scripts/"
-    cp "$SCRIPT_DIR/scripts/start-kiosk.sh"   "$INSTALL_DIR/scripts/"
-    cp "$SCRIPT_DIR/wifi-portal/portal.py"    "$INSTALL_DIR/wifi-portal/"
-    cp "$SCRIPT_DIR/services/"*.service       /etc/systemd/system/
+    cp "$SCRIPT_DIR/scripts/wifi-setup.sh"      "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/scripts/start-kiosk.sh"     "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/scripts/wifi-watchdog.sh"   "$INSTALL_DIR/scripts/"
+    cp "$SCRIPT_DIR/wifi-portal/portal.py"      "$INSTALL_DIR/wifi-portal/"
+    cp "$SCRIPT_DIR/services/"*.service         /etc/systemd/system/
+    cp "$SCRIPT_DIR/services/"*.timer           /etc/systemd/system/ 2>/dev/null || true
     log "Dateien aus lokalem Repo kopiert"
 else
     warn "Lade Dateien von GitHub..."
     REPO="https://raw.githubusercontent.com/emre-di01/mosque-signage/main/pi"
-    curl -sSL "$REPO/scripts/wifi-setup.sh"          -o "$INSTALL_DIR/scripts/wifi-setup.sh"
-    curl -sSL "$REPO/scripts/start-kiosk.sh"         -o "$INSTALL_DIR/scripts/start-kiosk.sh"
-    curl -sSL "$REPO/wifi-portal/portal.py"          -o "$INSTALL_DIR/wifi-portal/portal.py"
-    curl -sSL "$REPO/services/wifi-setup.service"    -o /etc/systemd/system/wifi-setup.service
-    curl -sSL "$REPO/services/mosque-portal.service" -o /etc/systemd/system/mosque-portal.service
-    curl -sSL "$REPO/services/mosque-kiosk.service"  -o /etc/systemd/system/mosque-kiosk.service
+    curl -sSL "$REPO/scripts/wifi-setup.sh"                    -o "$INSTALL_DIR/scripts/wifi-setup.sh"
+    curl -sSL "$REPO/scripts/start-kiosk.sh"                   -o "$INSTALL_DIR/scripts/start-kiosk.sh"
+    curl -sSL "$REPO/scripts/wifi-watchdog.sh"                 -o "$INSTALL_DIR/scripts/wifi-watchdog.sh"
+    curl -sSL "$REPO/wifi-portal/portal.py"                    -o "$INSTALL_DIR/wifi-portal/portal.py"
+    curl -sSL "$REPO/services/wifi-setup.service"              -o /etc/systemd/system/wifi-setup.service
+    curl -sSL "$REPO/services/mosque-portal.service"           -o /etc/systemd/system/mosque-portal.service
+    curl -sSL "$REPO/services/mosque-kiosk.service"            -o /etc/systemd/system/mosque-kiosk.service
+    curl -sSL "$REPO/services/mosque-wifi-watchdog.service"    -o /etc/systemd/system/mosque-wifi-watchdog.service
+    curl -sSL "$REPO/services/mosque-kiosk-restart.service"    -o /etc/systemd/system/mosque-kiosk-restart.service
+    curl -sSL "$REPO/services/mosque-kiosk-restart.timer"      -o /etc/systemd/system/mosque-kiosk-restart.timer
     log "Dateien von GitHub geladen"
 fi
 
@@ -222,13 +228,50 @@ log "Auto-Login für '$KIOSK_USER' auf tty1"
 # ── 9. Systemd-Lingering (XDG_RUNTIME_DIR beim Boot) ─────────────────────────
 loginctl enable-linger "$KIOSK_USER" 2>/dev/null || true
 
-# ── 10. Services aktivieren ───────────────────────────────────────────────────
+# ── 10. Hardware Watchdog ─────────────────────────────────────────────────────
+section "Hardware Watchdog"
+# bcm2835_wdt: Pi-eigener Watchdog — startet Pi neu wenn OS einfriert
+echo 'bcm2835-wdt' >> /etc/modules 2>/dev/null || true
+if command -v apt-get &>/dev/null; then
+    apt-get install -y --no-install-recommends watchdog 2>/dev/null || true
+fi
+if [ -f /etc/watchdog.conf ]; then
+    cat > /etc/watchdog.conf << 'WDEOF'
+watchdog-device     = /dev/watchdog
+watchdog-timeout    = 15
+retry-timeout       = 60
+interval            = 5
+realtime            = yes
+priority            = 1
+WDEOF
+    systemctl enable watchdog 2>/dev/null || true
+    log "Hardware-Watchdog aktiviert"
+fi
+
+# ── 11. Log-Rotation ─────────────────────────────────────────────────────────
+section "Log-Rotation"
+cat > /etc/logrotate.d/mosque << 'LREOF'
+/var/log/mosque-wifi.log
+/var/log/mosque-kiosk.log
+{
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+}
+LREOF
+log "Log-Rotation konfiguriert"
+
+# ── 12. Services aktivieren ───────────────────────────────────────────────────
 section "Services aktivieren"
 systemctl daemon-reload
 systemctl enable wifi-setup.service
 systemctl enable mosque-portal.service
 systemctl enable mosque-kiosk.service
-log "wifi-setup, mosque-portal, mosque-kiosk aktiviert"
+systemctl enable mosque-wifi-watchdog.service
+systemctl enable mosque-kiosk-restart.timer
+log "wifi-setup, mosque-portal, mosque-kiosk, wifi-watchdog, nightly-restart aktiviert"
 
 # ── Zusammenfassung ───────────────────────────────────────────────────────────
 echo ""

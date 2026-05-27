@@ -122,10 +122,12 @@ log "Gemountet"
 section "Mosque-Signage Dateien kopieren"
 mkdir -p "$MOUNT_ROOT/opt/mosque/"{scripts,wifi-portal}
 
-cp "$SCRIPT_DIR/scripts/wifi-setup.sh"  "$MOUNT_ROOT/opt/mosque/scripts/"
-cp "$SCRIPT_DIR/scripts/start-kiosk.sh" "$MOUNT_ROOT/opt/mosque/scripts/"
-cp "$SCRIPT_DIR/wifi-portal/portal.py"  "$MOUNT_ROOT/opt/mosque/wifi-portal/"
-cp "$SCRIPT_DIR/services/"*.service     "$MOUNT_ROOT/etc/systemd/system/"
+cp "$SCRIPT_DIR/scripts/wifi-setup.sh"    "$MOUNT_ROOT/opt/mosque/scripts/"
+cp "$SCRIPT_DIR/scripts/start-kiosk.sh"   "$MOUNT_ROOT/opt/mosque/scripts/"
+cp "$SCRIPT_DIR/scripts/wifi-watchdog.sh" "$MOUNT_ROOT/opt/mosque/scripts/"
+cp "$SCRIPT_DIR/wifi-portal/portal.py"    "$MOUNT_ROOT/opt/mosque/wifi-portal/"
+cp "$SCRIPT_DIR/services/"*.service       "$MOUNT_ROOT/etc/systemd/system/"
+cp "$SCRIPT_DIR/services/"*.timer         "$MOUNT_ROOT/etc/systemd/system/" 2>/dev/null || true
 chmod +x "$MOUNT_ROOT/opt/mosque/scripts/"*.sh
 
 # CMS-URL eintragen
@@ -199,7 +201,35 @@ systemctl disable hostapd dnsmasq 2>/dev/null || true
 systemctl enable wifi-setup.service
 systemctl enable mosque-portal.service
 systemctl enable mosque-kiosk.service
+systemctl enable mosque-wifi-watchdog.service
+systemctl enable mosque-kiosk-restart.timer
 systemctl enable avahi-daemon
+
+# Hardware Watchdog
+echo 'bcm2835-wdt' >> /etc/modules
+apt-get install -y --no-install-recommends watchdog 2>/dev/null || true
+cat > /etc/watchdog.conf << 'WDEOF'
+watchdog-device     = /dev/watchdog
+watchdog-timeout    = 15
+retry-timeout       = 60
+interval            = 5
+realtime            = yes
+priority            = 1
+WDEOF
+systemctl enable watchdog 2>/dev/null || true
+
+# Log-Rotation
+cat > /etc/logrotate.d/mosque << 'LREOF'
+/var/log/mosque-wifi.log
+/var/log/mosque-kiosk.log
+{
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+}
+LREOF
 
 # Linger aktivieren
 loginctl enable-linger kiosk 2>/dev/null || true

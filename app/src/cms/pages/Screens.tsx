@@ -373,6 +373,8 @@ const AZAN_PRAYERS: { key: AzanPrayer; labelKey: keyof ReturnType<typeof useCmsT
   { key: 'isha',    labelKey: 'azanIsha'    },
 ]
 
+const AUDIO_EXTS = ['mp3', 'aac', 'ogg', 'wav', 'm4a', 'opus', 'flac']
+
 function AzanEditor({ screenId, config: initial, onSave }: {
   screenId: string
   config: AzanConfig | null
@@ -385,40 +387,83 @@ function AzanEditor({ screenId, config: initial, onSave }: {
     overlay: true,
     prayers: {},
   })
-  const [uploading, setUploading] = useState<AzanPrayer | null>(null)
-  const [saving, setSaving] = useState(false)
-  const fileRefs = useRef<Partial<Record<AzanPrayer, HTMLInputElement | null>>>({})
+  const [uploading, setUploading]   = useState<AzanPrayer | null>(null)
+  const [saving, setSaving]         = useState(false)
+  const [playing, setPlaying]       = useState<AzanPrayer | null>(null)  // Audio-Vorschau
+  const [pickerFor, setPickerFor]   = useState<AzanPrayer | null>(null)  // Mediathek-Picker
+  const [mediaFiles, setMediaFiles] = useState<{ name: string; url: string }[]>([])
+  const [loadingMedia, setLoadingMedia] = useState(false)
+  const fileRefs   = useRef<Partial<Record<AzanPrayer, HTMLInputElement | null>>>({})
+  const audioRef   = useRef<HTMLAudioElement | null>(null)
 
-  function toggleEnabled() {
-    setCfg(c => ({ ...c, enabled: !c.enabled }))
+  // ── Audio-Vorschau ─────────────────────────────────────────────────────────
+  function togglePreview(prayer: AzanPrayer, url: string) {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    if (playing === prayer) { setPlaying(null); return }
+
+    const audio = new Audio(url)
+    audioRef.current = audio
+    audio.play().catch(console.error)
+    audio.onended = () => setPlaying(null)
+    setPlaying(prayer)
   }
 
-  function toggleOverlay() {
-    setCfg(c => ({ ...c, overlay: !c.overlay }))
+  // Cleanup bei Unmount
+  useEffect(() => () => { audioRef.current?.pause() }, [])
+
+  // ── Mediathek laden ────────────────────────────────────────────────────────
+  async function openMediaPicker(prayer: AzanPrayer) {
+    setPickerFor(prayer)
+    if (mediaFiles.length > 0) return  // schon geladen
+    setLoadingMedia(true)
+    try {
+      // Haupt-Bucket + azan/-Ordner durchsuchen
+      const [{ data: root }, { data: azanDir }] = await Promise.all([
+        supabase.storage.from('media').list('', { limit: 500 }),
+        supabase.storage.from('media').list('azan', { limit: 200 }),
+      ])
+      const rootFiles = (root ?? []).filter(f => !f.id?.includes('/'))  // nur Root-Level
+      const azanFiles = (azanDir ?? []).map(f => ({ ...f, name: `azan/${f.name}` }))
+      const all = [...rootFiles, ...azanFiles]
+      const audioFiles = all.filter(f => {
+        const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
+        return AUDIO_EXTS.includes(ext)
+      })
+      setMediaFiles(audioFiles.map(f => ({
+        name: f.name,
+        url: supabase.storage.from('media').getPublicUrl(f.name).data.publicUrl,
+      })))
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoadingMedia(false)
+    }
   }
 
+  function selectFromMedia(url: string) {
+    if (!pickerFor) return
+    setCfg(c => ({ ...c, prayers: { ...c.prayers, [pickerFor]: { url } } }))
+    setPickerFor(null)
+  }
+
+  // ── Upload ─────────────────────────────────────────────────────────────────
   async function uploadAudio(prayer: AzanPrayer, file: File) {
     if (!user) return
     setUploading(prayer)
     try {
       const ext = file.name.split('.').pop() ?? 'mp3'
       const path = `azan/${user.id}/${screenId}-${prayer}.${ext}`
-
-      // Altes File löschen (falls vorhanden)
       await supabase.storage.from('media').remove([path])
-
       const { error } = await supabase.storage.from('media').upload(path, file, {
-        cacheControl: '3600',
-        upsert: true,
-        contentType: file.type || 'audio/mpeg',
+        cacheControl: '3600', upsert: true, contentType: file.type || 'audio/mpeg',
       })
       if (error) throw error
-
       const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(path)
-      setCfg(c => ({
-        ...c,
-        prayers: { ...c.prayers, [prayer]: { url: publicUrl } },
-      }))
+      setCfg(c => ({ ...c, prayers: { ...c.prayers, [prayer]: { url: publicUrl } } }))
+      setMediaFiles([])  // Mediathek-Cache invalidieren
     } catch (e) {
       console.error('Azan upload error:', e)
     } finally {
@@ -427,17 +472,8 @@ function AzanEditor({ screenId, config: initial, onSave }: {
   }
 
   async function removeAudio(prayer: AzanPrayer) {
-    const currentUrl = cfg.prayers?.[prayer]?.url
-    if (currentUrl) {
-      // Aus URL den Storage-Pfad extrahieren
-      const path = currentUrl.split('/media/')[1]?.split('?')[0]
-      if (path) await supabase.storage.from('media').remove([path])
-    }
-    setCfg(c => {
-      const prayers = { ...c.prayers }
-      delete prayers[prayer]
-      return { ...c, prayers }
-    })
+    audioRef.current?.pause(); audioRef.current = null; setPlaying(null)
+    setCfg(c => { const p = { ...c.prayers }; delete p[prayer]; return { ...c, prayers: p } })
   }
 
   async function handleSave() {
@@ -450,82 +486,112 @@ function AzanEditor({ screenId, config: initial, onSave }: {
     <div className="mt-3 flex flex-col gap-3">
       {/* Toggles */}
       <div className="flex flex-col gap-2 rounded-lg p-3" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-        <label className="flex items-center justify-between cursor-pointer">
-          <span className="text-gray-300 text-xs font-medium">{t.sc.azanEnabled}</span>
-          <div
-            onClick={toggleEnabled}
-            className={`relative w-10 h-5 rounded-full transition ${cfg.enabled ? 'bg-emerald-600' : 'bg-gray-700'}`}
-          >
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${cfg.enabled ? 'left-5' : 'left-0.5'}`} />
+        {([
+          { key: 'enabled', label: t.sc.azanEnabled, hint: null, val: cfg.enabled, toggle: () => setCfg(c => ({ ...c, enabled: !c.enabled })) },
+          { key: 'overlay', label: t.sc.azanOverlay,  hint: t.sc.azanOverlayHint, val: cfg.overlay, toggle: () => setCfg(c => ({ ...c, overlay: !c.overlay })) },
+        ] as const).map(({ key, label, hint, val, toggle }) => (
+          <div key={key} className="flex items-center justify-between gap-3">
+            <div>
+              <span className="text-gray-300 text-xs font-medium">{label}</span>
+              {hint && <p className="text-gray-600 text-xs">{hint}</p>}
+            </div>
+            <div onClick={toggle} className={`relative w-10 h-5 rounded-full transition cursor-pointer shrink-0 ${val ? 'bg-emerald-600' : 'bg-gray-700'}`}>
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${val ? 'left-5' : 'left-0.5'}`} />
+            </div>
           </div>
-        </label>
-        <label className="flex items-center justify-between cursor-pointer">
-          <div>
-            <span className="text-gray-300 text-xs font-medium">{t.sc.azanOverlay}</span>
-            <p className="text-gray-600 text-xs">{t.sc.azanOverlayHint}</p>
-          </div>
-          <div
-            onClick={toggleOverlay}
-            className={`relative w-10 h-5 rounded-full transition shrink-0 ml-3 ${cfg.overlay ? 'bg-emerald-600' : 'bg-gray-700'}`}
-          >
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${cfg.overlay ? 'left-5' : 'left-0.5'}`} />
-          </div>
-        </label>
+        ))}
       </div>
 
       {/* Pro-Gebet Audio */}
       <div className="flex flex-col gap-1.5">
         {AZAN_PRAYERS.map(({ key, labelKey }) => {
-          const audioUrl = cfg.prayers?.[key]?.url ?? null
+          const audioUrl    = cfg.prayers?.[key]?.url ?? null
           const isUploading = uploading === key
-          const fileName = audioUrl ? decodeURIComponent(audioUrl.split('/').pop()?.split('?')[0] ?? '') : null
+          const isPlaying   = playing === key
+          const fileName    = audioUrl
+            ? decodeURIComponent(audioUrl.split('/').pop()?.split('?')[0] ?? '')
+            : null
+
           return (
-            <div key={key} className="rounded-lg p-2.5 flex items-center gap-2" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-              <span className="text-gray-400 text-xs font-medium w-20 shrink-0">
-                {t.sc[labelKey] as string}
-              </span>
-              <div className="flex-1 min-w-0">
-                {audioUrl ? (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-emerald-400 text-xs truncate flex-1">🎵 {fileName}</span>
-                    <button
-                      onClick={() => removeAudio(key)}
-                      className="text-gray-600 hover:text-red-400 text-xs transition shrink-0"
-                      title={t.sc.azanRemove}
-                    >✕</button>
-                  </div>
-                ) : (
-                  <span className="text-gray-600 text-xs">{t.sc.azanNoAudio}</span>
-                )}
+            <div key={key} className="rounded-lg p-2.5 flex flex-col gap-1.5"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+
+              {/* Zeile 1: Name + Status + Buttons */}
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400 text-xs font-medium w-20 shrink-0">
+                  {t.sc[labelKey] as string}
+                </span>
+
+                <div className="flex-1 min-w-0">
+                  {audioUrl ? (
+                    <div className="flex items-center gap-1">
+                      {/* Vorschau-Button */}
+                      <button
+                        onClick={() => togglePreview(key, audioUrl)}
+                        className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs transition
+                          ${isPlaying ? 'bg-amber-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                        title={isPlaying ? 'Stop' : 'Vorschau'}
+                      >
+                        {isPlaying ? '■' : '▶'}
+                      </button>
+                      <span className="text-emerald-400 text-xs truncate flex-1 min-w-0">{fileName}</span>
+                      <button onClick={() => removeAudio(key)}
+                        className="text-gray-600 hover:text-red-400 text-xs transition shrink-0">✕</button>
+                    </div>
+                  ) : (
+                    <span className="text-gray-600 text-xs">{t.sc.azanNoAudio}</span>
+                  )}
+                </div>
+
+                {/* Upload */}
+                <input type="file" accept="audio/*" className="hidden"
+                  ref={el => { fileRefs.current[key] = el }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadAudio(key, f); e.target.value = '' }}
+                />
+                <button onClick={() => fileRefs.current[key]?.click()} disabled={isUploading}
+                  className="shrink-0 text-xs text-gray-500 hover:text-emerald-400 disabled:opacity-40 transition"
+                  title={t.sc.azanUpload}>
+                  {isUploading ? '…' : '⬆'}
+                </button>
+
+                {/* Mediathek */}
+                <button onClick={() => openMediaPicker(key)}
+                  className="shrink-0 text-xs text-gray-500 hover:text-emerald-400 transition"
+                  title="Aus Mediathek wählen">
+                  📂
+                </button>
               </div>
-              <input
-                type="file"
-                accept="audio/*"
-                className="hidden"
-                ref={el => { fileRefs.current[key] = el }}
-                onChange={e => {
-                  const file = e.target.files?.[0]
-                  if (file) uploadAudio(key, file)
-                  e.target.value = ''
-                }}
-              />
-              <button
-                onClick={() => fileRefs.current[key]?.click()}
-                disabled={isUploading}
-                className="shrink-0 text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-40 transition"
-              >
-                {isUploading ? '…' : t.sc.azanUpload}
-              </button>
+
+              {/* Mediathek-Picker (aufgeklappt für dieses Gebet) */}
+              {pickerFor === key && (
+                <div className="rounded-lg overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.1)', background: '#0d1117' }}>
+                  <div className="flex items-center justify-between px-2 py-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <span className="text-gray-400 text-xs">Aus Mediathek wählen</span>
+                    <button onClick={() => setPickerFor(null)} className="text-gray-600 hover:text-white text-xs">✕</button>
+                  </div>
+                  {loadingMedia ? (
+                    <div className="p-3 text-gray-600 text-xs text-center">Lade…</div>
+                  ) : mediaFiles.length === 0 ? (
+                    <div className="p-3 text-gray-600 text-xs text-center">Keine Audio-Dateien in der Mediathek</div>
+                  ) : (
+                    <div className="max-h-36 overflow-y-auto">
+                      {mediaFiles.map(f => (
+                        <button key={f.url} onClick={() => selectFromMedia(f.url)}
+                          className="w-full text-left px-2 py-1.5 text-xs text-gray-300 hover:bg-white/5 hover:text-white transition truncate block">
+                          🎵 {f.name.split('/').pop()}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )
         })}
       </div>
 
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition"
-      >
+      <button onClick={handleSave} disabled={saving}
+        className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">
         {saving ? t.sc.azanSaving : t.sc.azanSave}
       </button>
     </div>

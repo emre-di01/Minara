@@ -1,0 +1,8 @@
+[Unit]
+Description=Mosque Kiosk nächtlicher Neustart
+After=mosque-kiosk.service
+
+[Service]
+Type=oneshot
+# Chromium-Cache leeren bevor Neustart (verhindert Speicher-Aufbau über Zeit)
+ExecStart=/bin/sh -c 'rm -rf /home/kiosk/.config/chromium-kiosk/Default/Cache/* 2>/dev/null; systemctl restart mosque-kiosk.service'

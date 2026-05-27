@@ -1,0 +1,13 @@
+[Unit]
+Description=Mosque Kiosk nächtlicher Neustart (3:00 Uhr)
+
+[Timer]
+# Täglich um 3:00 Uhr — nachts, wenn keine Gebetszeiten anstehen
+OnCalendar=*-*-* 03:00:00
+# Auch nachholen wenn der Pi um 3 Uhr aus war
+Persistent=true
+# Zufällige Verzögerung bis 60s damit nicht alle Geräte gleichzeitig rebooten
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
