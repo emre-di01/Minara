@@ -168,51 +168,77 @@ function ScreenContent({
     return () => clearTimeout(timer)
   }, [azanConfig?.enabled, prayerSource, cityId])
 
-  // ── Ezan-Trigger: gezielter setTimeout statt polling ────────────────────────
-  // Berechnet genau wann das nächste Gebet ist und wartet nur so lange.
-  // Zwischen Gebeten läuft gar kein Timer — null Overhead.
+  // ── Ezan-Trigger: Hybrid-Ansatz ─────────────────────────────────────────────
+  // 1. setTimeout schläft bis 30s vor dem Gebet     → null CPU-Last dazwischen
+  // 2. Dann setInterval(500ms) für präzise Erkennung → fängt auch verspätete Timer auf
+  // Fenster: -30s bis +120s um die Gebetsminute (robust gegen Timer-Drift)
   useEffect(() => {
     if (!azanConfig?.enabled || !prayerTimes) return
 
-    let timer: ReturnType<typeof setTimeout>
+    let sleepTimer: ReturnType<typeof setTimeout> | null = null
+    let watchTimer: ReturnType<typeof setInterval> | null = null
+
+    function cleanup() {
+      if (sleepTimer) { clearTimeout(sleepTimer); sleepTimer = null }
+      if (watchTimer) { clearInterval(watchTimer); watchTimer = null }
+    }
 
     function scheduleNext() {
+      cleanup()
       const now = new Date()
       const dateKey = now.toISOString().slice(0, 10)
 
       for (const prayer of AZAN_PRAYERS) {
         const prayerTime = prayerTimes![prayer] as string | undefined
         if (!prayerTime) continue
+        if (!azanConfig!.prayers?.[prayer]?.url && !azanConfig!.overlay) continue
 
         const [h, m] = prayerTime.split(':').map(Number)
         const target = new Date(now)
         target.setHours(h, m, 0, 0)
-
-        // Gebet in der Zukunft und noch nicht heute ausgelöst?
         const triggerKey = `${prayer}-${dateKey}`
-        if (target <= now || lastAzanRef.current === triggerKey) continue
 
-        // Kein Audio und kein Overlay → überspringen
-        if (!azanConfig!.prayers?.[prayer]?.url && !azanConfig!.overlay) continue
+        if (lastAzanRef.current === triggerKey) continue // heute schon ausgelöst
 
-        const ms = target.getTime() - now.getTime()
-        timer = setTimeout(() => {
-          lastAzanRef.current = triggerKey
-          setActiveAzan(prayer)
-          scheduleNext() // nächstes Gebet einplanen
-        }, ms)
+        const msToTarget = target.getTime() - now.getTime()
+
+        if (msToTarget < -120_000) continue // mehr als 2 Min vorbei → skip
+
+        if (msToTarget > 30_000) {
+          // Weit weg → schlafen bis 30s vor dem Gebet, dann neu prüfen
+          sleepTimer = setTimeout(scheduleNext, msToTarget - 30_000)
+          return
+        }
+
+        // ≤ 30s vor oder bis 2 Min nach Gebetszeit: präzise mit 500ms-Takt wachen
+        watchTimer = setInterval(() => {
+          const n = new Date()
+          const hhmm = `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`
+
+          if (hhmm === prayerTime && lastAzanRef.current !== triggerKey) {
+            clearInterval(watchTimer!); watchTimer = null
+            lastAzanRef.current = triggerKey
+            setActiveAzan(prayer)
+            // Nächstes Gebet einplanen sobald dieses vorbei ist
+            sleepTimer = setTimeout(scheduleNext, 3 * 60_000)
+            return
+          }
+
+          // Fenster abgelaufen ohne Match → weiter zum nächsten Gebet
+          if (n.getTime() > target.getTime() + 120_000) scheduleNext()
+        }, 500)
         return
       }
 
-      // Alle Gebete für heute vorbei → kurz nach Mitternacht neu planen
+      // Alle heutigen Gebete vorbei → kurz nach Mitternacht neu starten
       const tomorrow = new Date(now)
       tomorrow.setDate(tomorrow.getDate() + 1)
-      tomorrow.setHours(0, 0, 5, 0) // 00:00:05 — nach dem Mitternachts-Reload
-      timer = setTimeout(scheduleNext, tomorrow.getTime() - now.getTime())
+      tomorrow.setHours(0, 0, 10, 0)
+      sleepTimer = setTimeout(scheduleNext, tomorrow.getTime() - now.getTime())
     }
 
     scheduleNext()
-    return () => clearTimeout(timer)
+    return cleanup
   }, [azanConfig, prayerTimes])
 
   return (
