@@ -251,9 +251,12 @@ rm -f /etc/profile.d/sshpwd.sh 2>/dev/null || true
 
 # Kiosk-User anlegen
 useradd -m -u 1001 -s /bin/bash kiosk 2>/dev/null || true
-usermod -aG video,audio,input,render,netdev,tty kiosk
+usermod -aG video,audio,input,render,netdev,tty,sudo kiosk
 # Passwort setzen — nötig damit userconfig.service den User als "konfiguriert" akzeptiert
 echo "kiosk:kiosk" | chpasswd
+# Passwordloses sudo (Kiosk-Gerät, kein Multi-User-System)
+echo "kiosk ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/kiosk
+chmod 440 /etc/sudoers.d/kiosk
 
 # XDG_RUNTIME_DIR
 mkdir -p /run/user/1001
@@ -294,18 +297,18 @@ if [ -d "$THEME_DIR" ]; then
     echo "[chroot] Plymouth-Theme: minara"
 fi
 
-# Plymouth-quit Timeout: verhindert ewigen Hang wenn plymouthd nicht startet (z.B. Boot 1 mit QEMU-initramfs)
+# plymouth-quit-wait.service maskieren: verhindert Boot-Hang wenn plymouthd nicht startet.
+# Ursache: 'plymouth --wait' reagiert nicht auf SIGTERM → systemd wartet bis zu 90s auf SIGKILL.
+# Für Kiosk-Boot ist das Warten auf Plymouth nicht nötig — cage übernimmt den Display direkt.
+systemctl mask plymouth-quit-wait.service 2>/dev/null || true
+# plymouth-quit selbst kurz halten (sendet quit-Signal, aber wir warten nicht drauf)
 mkdir -p /etc/systemd/system/plymouth-quit.service.d
 cat > /etc/systemd/system/plymouth-quit.service.d/timeout.conf << 'PLEOF'
 [Service]
-TimeoutSec=10
+TimeoutSec=5
+TimeoutStopSec=3
 PLEOF
-mkdir -p /etc/systemd/system/plymouth-quit-wait.service.d
-cat > /etc/systemd/system/plymouth-quit-wait.service.d/timeout.conf << 'PLEOF'
-[Service]
-TimeoutSec=10
-PLEOF
-echo "[chroot] Plymouth-Quit Timeout: 10s"
+echo "[chroot] plymouth-quit-wait maskiert, plymouth-quit Timeout: 5s"
 
 # Hardware Watchdog
 echo 'bcm2835-wdt' >> /etc/modules

@@ -80,7 +80,9 @@ else
     KIOSK_UID=$(id -u "$KIOSK_USER")
     log "User '$KIOSK_USER' existiert bereits (UID $KIOSK_UID)"
 fi
-usermod -aG video,audio,input,render,netdev,tty "$KIOSK_USER"
+usermod -aG video,audio,input,render,netdev,tty,sudo "$KIOSK_USER"
+echo "$KIOSK_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/kiosk
+chmod 440 /etc/sudoers.d/kiosk
 
 # XDG_RUNTIME_DIR für kiosk-User anlegen
 mkdir -p "/run/user/$KIOSK_UID"
@@ -280,20 +282,17 @@ if [ -f "$CMDLINE" ]; then
     log "cmdline.txt aktualisiert"
 fi
 
-# ── Plymouth-quit Timeout (verhindert ewigen Hang wenn plymouthd nicht startet) ──
-section "Plymouth-Timeouts setzen"
+# ── Plymouth-quit-wait maskieren (verhindert Boot-Hang) ──────────────────────
+section "Plymouth-Hang-Fix"
+systemctl mask plymouth-quit-wait.service 2>/dev/null || true
 mkdir -p /etc/systemd/system/plymouth-quit.service.d
 cat > /etc/systemd/system/plymouth-quit.service.d/timeout.conf << 'PLEOF'
 [Service]
-TimeoutSec=10
-PLEOF
-mkdir -p /etc/systemd/system/plymouth-quit-wait.service.d
-cat > /etc/systemd/system/plymouth-quit-wait.service.d/timeout.conf << 'PLEOF'
-[Service]
-TimeoutSec=10
+TimeoutSec=5
+TimeoutStopSec=3
 PLEOF
 systemctl daemon-reload 2>/dev/null || true
-log "Plymouth-Quit Timeout: 10s"
+log "plymouth-quit-wait maskiert — Boot hängt nie mehr an Plymouth"
 
 # ── 6. Geräte-ID ─────────────────────────────────────────────────────────────
 section "Geräte-ID"
