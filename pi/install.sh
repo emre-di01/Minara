@@ -63,8 +63,6 @@ apt-get install -y --no-install-recommends \
     avahi-utils \
     libnss-mdns \
     dbus-user-session \
-    plymouth \
-    plymouth-themes \
     wlr-randr \
     2>/dev/null
 
@@ -126,44 +124,11 @@ fi
 chmod +x "$INSTALL_DIR/scripts/"*.sh
 sed -i "s|CMS_URL=.*|CMS_URL=\"$CMS_URL\"|" "$INSTALL_DIR/scripts/start-kiosk.sh"
 
-# Brand-Ordner (Logo für WiFi-Portal + Plymouth)
+# Brand-Ordner (Logo für WiFi-Portal)
 mkdir -p "$INSTALL_DIR/brand"
 chown -R "$KIOSK_USER:$KIOSK_USER" "$INSTALL_DIR"
 
-# ── 3b. Plymouth-Theme installieren ──────────────────────────────────────────
-section "Boot-Theme installieren"
-THEME_SRC="${SCRIPT_DIR:-/tmp/mosque-pi}/plymouth/minara"
-THEME_DST="/usr/share/plymouth/themes/minara"
-
-if [ -d "$THEME_SRC" ]; then
-    mkdir -p "$THEME_DST"
-    cp "$THEME_SRC/minara.plymouth" "$THEME_DST/"
-    cp "$THEME_SRC/minara.script"   "$THEME_DST/"
-
-    # Logo: eigenes bevorzugen, sonst generieren
-    if [ -f "$INSTALL_DIR/brand/logo.png" ]; then
-        cp "$INSTALL_DIR/brand/logo.png" "$THEME_DST/logo.png"
-        log "Eigenes Logo übernommen"
-    elif [ -f "$THEME_SRC/generate-logo.py" ]; then
-        python3 "$THEME_SRC/generate-logo.py" 2>/dev/null && \
-            cp "$THEME_SRC/logo.png" "$THEME_DST/logo.png" || \
-            warn "Logo-Generierung fehlgeschlagen — fallback auf Text"
-        log "Standard-Logo generiert"
-    fi
-
-    if command -v plymouth-set-default-theme &>/dev/null; then
-        plymouth-set-default-theme minara 2>/dev/null && \
-            update-initramfs -u -k all && \
-            log "Plymouth-Theme aktiv: minara (initramfs aktualisiert)" || \
-            warn "Plymouth theme setzen fehlgeschlagen (nicht kritisch)"
-    else
-        warn "plymouth-set-default-theme nicht gefunden — Theme kopiert aber nicht aktiv"
-    fi
-else
-    warn "Plymouth-Theme-Quellen nicht gefunden — übersprungen"
-fi
-
-# ── 3c. Brand-Logo: SVG → PNG konvertieren ────────────────────────────────────
+# ── 3b. Brand-Logo: SVG → PNG konvertieren ───────────────────────────────────
 section "Brand-Logo"
 BRAND_SVG="$INSTALL_DIR/brand/logo.svg"
 BRAND_PNG="$INSTALL_DIR/brand/logo.png"
@@ -268,13 +233,8 @@ if [ -f "$CMDLINE" ]; then
     if ! grep -q "quiet" "$CMDLINE"; then
         sed -i 's/$/ quiet/' "$CMDLINE"
     fi
-    # splash + plymouth.ignore-serial-consoles:
-    # OHNE splash läuft Plymouth im Textmodus und kann bei Terminate hängen
-    if ! grep -q "splash" "$CMDLINE"; then
-        sed -i 's/quiet/quiet splash plymouth.ignore-serial-consoles/' "$CMDLINE"
-    elif ! grep -q "plymouth.ignore-serial-consoles" "$CMDLINE"; then
-        sed -i 's/$/ plymouth.ignore-serial-consoles/' "$CMDLINE"
-    fi
+    # splash entfernen falls vorhanden (Plymouth deaktiviert)
+    sed -i 's/ splash//g; s/ plymouth\.ignore-serial-consoles//g' "$CMDLINE"
     # DPMS/Screen-Blanking im Kernel deaktivieren
     if ! grep -q "consoleblank=0" "$CMDLINE"; then
         sed -i 's/$/ consoleblank=0/' "$CMDLINE"
@@ -282,17 +242,9 @@ if [ -f "$CMDLINE" ]; then
     log "cmdline.txt aktualisiert"
 fi
 
-# ── Plymouth-quit-wait maskieren (verhindert Boot-Hang) ──────────────────────
-section "Plymouth-Hang-Fix"
-systemctl mask plymouth-quit-wait.service 2>/dev/null || true
-mkdir -p /etc/systemd/system/plymouth-quit.service.d
-cat > /etc/systemd/system/plymouth-quit.service.d/timeout.conf << 'PLEOF'
-[Service]
-TimeoutSec=5
-TimeoutStopSec=3
-PLEOF
+# Plymouth komplett deaktivieren (falls bereits installiert)
+systemctl mask plymouth.service plymouth-start.service plymouth-quit.service plymouth-quit-wait.service 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
-log "plymouth-quit-wait maskiert — Boot hängt nie mehr an Plymouth"
 
 # ── 6. Geräte-ID ─────────────────────────────────────────────────────────────
 section "Geräte-ID"
