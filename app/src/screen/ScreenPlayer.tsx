@@ -5,6 +5,22 @@ import type { AzanConfig, AzanPrayer, MosqueProfile, Playlist, PrayerSource, Pra
 import SlideRenderer from '../slides/SlideRenderer'
 import { loadScreenConfig, saveScreenConfig } from '../lib/offline-cache'
 
+// Audio-Unlock: Browser blockiert Autoplay bis zur ersten Nutzer-Geste.
+// Beim ersten Touch/Click eine stille Audio-Datei abspielen → entsperrt Audio global für diese Session.
+// Danach funktioniert audio.play() ohne weitere Geste (z.B. beim Ezan).
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAAABkYXRhAAAAAA=='
+let _audioUnlocked = false
+function unlockAudio() {
+  if (_audioUnlocked) return
+  _audioUnlocked = true
+  const a = new Audio(SILENT_WAV)
+  a.volume = 0
+  a.play().catch(() => {})
+}
+document.addEventListener('click',      unlockAudio, { capture: true, passive: true, once: true })
+document.addEventListener('touchstart', unlockAudio, { capture: true, passive: true, once: true })
+document.addEventListener('keydown',    unlockAudio, { capture: true, passive: true, once: true })
+
 interface Props {
   hardwareId: string
 }
@@ -336,8 +352,26 @@ function ScreenContent({
     return cleanup
   }, [azanConfig, prayerTimes])
 
+  // ── OLED Pixel-Shift ─────────────────────────────────────────────────────────
+  const [shift, setShift] = useState({ x: 0, y: 0 })
+  const oled = screen.oled_config ?? null
+  useEffect(() => {
+    if (!oled?.pixelShift) { setShift({ x: 0, y: 0 }); return }
+    const ms = (oled.intervalMinutes ?? 3) * 60_000
+    const id = setInterval(() => {
+      setShift({
+        x: Math.round((Math.random() * 4) - 2),
+        y: Math.round((Math.random() * 4) - 2),
+      })
+    }, ms)
+    return () => clearInterval(id)
+  }, [oled?.pixelShift, oled?.intervalMinutes])
+
   return (
-    <div className="relative h-screen w-screen overflow-hidden">
+    <div
+      className="relative h-screen w-screen overflow-hidden"
+      style={{ transform: `translate(${shift.x}px, ${shift.y}px)`, transition: 'transform 2s ease-in-out' }}
+    >
       <SlidePlayer
         playlist={playlist}
         cityId={cityId}
@@ -409,7 +443,6 @@ function AzanOverlay({
         audioRef.current = audio
         audio.addEventListener('ended', onEnd)
         audio.play().catch(err => {
-          // Browser blockiert Autoplay ohne Nutzer-Geste → Tap-Hinweis anzeigen
           if ((err as DOMException).name === 'NotAllowedError') {
             setAudioBlocked(true)
           } else {
@@ -427,7 +460,24 @@ function AzanOverlay({
     }
   }, [audioUrl])
 
-  // Nutzer tippt → Autoplay-Sperre aufheben und Audio abspielen
+  // Retry-Loop: wenn geblockt, alle 1.5s erneut versuchen.
+  // Sobald Audio durch Nutzer-Geste entsperrt wurde (unlockAudio), klappt der nächste Versuch.
+  useEffect(() => {
+    if (!audioBlocked) return
+    const id = setInterval(() => {
+      if (!blobUrlRef.current) return
+      const audio = new Audio(blobUrlRef.current)
+      audio.addEventListener('ended', onEnd)
+      audio.play().then(() => {
+        audioRef.current?.removeEventListener('ended', onEnd)
+        audioRef.current?.pause()
+        audioRef.current = audio
+        setAudioBlocked(false)
+      }).catch(() => {})
+    }, 1500)
+    return () => clearInterval(id)
+  }, [audioBlocked, onEnd])
+
   function handleUnlock() {
     if (!audioBlocked || !blobUrlRef.current) return
     const audio = new Audio(blobUrlRef.current)
