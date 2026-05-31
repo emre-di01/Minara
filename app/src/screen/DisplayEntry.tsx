@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { loadScreenConfig } from '../lib/offline-cache'
 import PairingScreen from './PairingScreen'
 import ScreenPlayer from './ScreenPlayer'
-
-type State = 'loading' | 'pairing' | 'playing'
 
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -21,26 +20,34 @@ function getOrCreateHardwareId(): string {
   return id
 }
 
+type State = 'pairing' | 'playing'
+
 export default function DisplayEntry() {
-  const [state, setState] = useState<State>('loading')
-  const hardwareId = getOrCreateHardwareId()
+  const [hardwareId] = useState(() => getOrCreateHardwareId())
+  // Starte direkt mit 'pairing' — kein Netzwerk-abhängiger Loading-State
+  const [state, setState] = useState<State>('pairing')
+  const checkedRef = useRef(false)
 
   useEffect(() => {
-    async function checkPairing() {
-      const { data } = await supabase
-        .from('screens')
-        .select('paired')
-        .eq('hardware_id', hardwareId)
-        .maybeSingle()
+    if (checkedRef.current) return
+    checkedRef.current = true
 
-      if (data?.paired) {
-        setState('playing')
-      } else {
-        setState('pairing')
-      }
-    }
+    // 1. Sofort: Cache prüfen (kein Netzwerk)
+    loadScreenConfig(hardwareId).then(cached => {
+      if (cached?.screen?.paired) setState('playing')
+    }).catch(() => {})
 
-    checkPairing()
+    // 2. Im Hintergrund: Supabase prüfen (mit Timeout)
+    const timeout = setTimeout(() => {/* Timeout verstrichen, kein Problem */}, 4000)
+    supabase
+      .from('screens')
+      .select('paired')
+      .eq('hardware_id', hardwareId)
+      .maybeSingle()
+      .then(
+        ({ data }: { data: { paired: boolean } | null }) => { clearTimeout(timeout); if (data?.paired) setState('playing') },
+        () => clearTimeout(timeout)
+      )
 
     // Realtime: auf Kopplung warten
     const channel = supabase
@@ -51,22 +58,12 @@ export default function DisplayEntry() {
         table: 'screens',
         filter: `hardware_id=eq.${hardwareId}`,
       }, ({ new: row }) => {
-        if ((row as { paired: boolean }).paired) {
-          setState('playing')
-        }
+        if ((row as { paired: boolean }).paired) setState('playing')
       })
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
   }, [hardwareId])
-
-  if (state === 'loading') {
-    return (
-      <div className="h-screen w-screen bg-gray-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-      </div>
-    )
-  }
 
   if (state === 'pairing') {
     return <PairingScreen hardwareId={hardwareId} onPaired={() => setState('playing')} />

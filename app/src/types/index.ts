@@ -56,6 +56,12 @@ export interface Screen {
   city_id: number | null
   schedule?: ScheduleEntry[]
   azan_config?: AzanConfig | null
+  oled_config?: OledConfig | null
+}
+
+export interface OledConfig {
+  pixelShift: boolean
+  intervalMinutes: number
 }
 
 export interface PairingCode {

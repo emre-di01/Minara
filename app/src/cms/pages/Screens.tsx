@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/auth'
 import Layout from '../components/Layout'
 import CityPicker from '../components/CityPicker'
-import type { AzanConfig, AzanPrayer, DeviceCommand, Screen, Playlist, ScheduleEntry } from '../../types'
+import type { AzanConfig, AzanPrayer, DeviceCommand, OledConfig, Screen, Playlist, ScheduleEntry } from '../../types'
 import { useCmsT } from '../../lib/cms-lang'
 import { tpl, tplNamed } from '../../lib/cms-i18n'
 
@@ -13,9 +13,21 @@ export default function Screens() {
   const [screens, setScreens] = useState<Screen[]>([])
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [showPairing, setShowPairing] = useState(false)
+  const [pairCodePrefill, setPairCodePrefill] = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
   const [bulkPlaylistId, setBulkPlaylistId] = useState('')
   const [bulkAssigning, setBulkAssigning] = useState(false)
+
+  // QR-Code-Link: ?pair=XXXXXX öffnet Pairing-Dialog direkt
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const pair = params.get('pair')
+    if (pair && /^\d{6}$/.test(pair)) {
+      setPairCodePrefill(pair)
+      setShowPairing(true)
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
 
   useEffect(() => {
     if (!user) return
@@ -88,6 +100,11 @@ export default function Screens() {
     if (data) setScreens(prev => prev.map(s => s.id === screenId ? data as Screen : s))
   }
 
+  async function saveOled(screenId: string, oledConfig: OledConfig) {
+    const { data } = await supabase.from('screens').update({ oled_config: oledConfig }).eq('id', screenId).select().single()
+    if (data) setScreens(prev => prev.map(s => s.id === screenId ? data as Screen : s))
+  }
+
   return (
     <Layout>
       <div className="p-6">
@@ -133,6 +150,7 @@ export default function Screens() {
                   onAssign={assignPlaylist} onCityAssign={assignCity}
                   onScheduleSave={saveSchedule}
                   onAzanSave={saveAzan}
+                  onOledSave={saveOled}
                   onDelete={() => window.confirm(tplNamed(t.sc.confirmDelete, { name: s.name })) && remove(s.id)}
                   deleting={deleting === s.id} />
               ))}
@@ -142,19 +160,20 @@ export default function Screens() {
       </div>
 
       {showPairing && (
-        <PairingDialog onPaired={onPaired} onClose={() => setShowPairing(false)} />
+        <PairingDialog prefillCode={pairCodePrefill} onPaired={onPaired} onClose={() => { setShowPairing(false); setPairCodePrefill('') }} />
       )}
     </Layout>
   )
 }
 
-function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave, onAzanSave, onDelete, deleting }: {
+function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave, onAzanSave, onOledSave, onDelete, deleting }: {
   screen: Screen
   playlists: Playlist[]
   onAssign: (screenId: string, playlistId: string | null) => void
   onCityAssign: (screenId: string, cityId: number | null) => void
   onScheduleSave: (screenId: string, schedule: ScheduleEntry[]) => void
   onAzanSave: (screenId: string, config: AzanConfig) => void
+  onOledSave: (screenId: string, config: OledConfig) => void
   onDelete: () => void
   deleting: boolean
 }) {
@@ -335,6 +354,49 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
             onSave={cfg => { onAzanSave(screen.id, cfg); setShowAzan(false) }}
           />
         )}
+      </div>
+
+      {/* OLED-Schutz */}
+      <div className="border-t border-gray-800 pt-2">
+        <div className="flex items-center justify-between">
+          <span className="text-gray-500 text-xs">
+            📺 OLED-Schutz
+            {screen.oled_config?.pixelShift && (
+              <span className="ml-1.5 text-emerald-500">●</span>
+            )}
+          </span>
+        </div>
+        <div className="mt-2 flex flex-col gap-2">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={screen.oled_config?.pixelShift ?? false}
+              onChange={e => onOledSave(screen.id, {
+                pixelShift: e.target.checked,
+                intervalMinutes: screen.oled_config?.intervalMinutes ?? 3,
+              })}
+              className="accent-emerald-500"
+            />
+            <span className="text-gray-300 text-xs">Pixel-Shift aktiv</span>
+          </label>
+          {screen.oled_config?.pixelShift && (
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500 text-xs">Intervall:</span>
+              <select
+                value={screen.oled_config?.intervalMinutes ?? 3}
+                onChange={e => onOledSave(screen.id, {
+                  pixelShift: true,
+                  intervalMinutes: Number(e.target.value),
+                })}
+                className="bg-gray-800 text-white text-xs rounded px-2 py-1 outline-none"
+              >
+                {[1, 2, 3, 5, 10].map(m => (
+                  <option key={m} value={m}>{m} min</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Remote-Befehle */}
@@ -720,13 +782,14 @@ function AzanEditor({ config: initial, onSave }: {
   )
 }
 
-function PairingDialog({ onPaired, onClose }: {
+function PairingDialog({ prefillCode = '', onPaired, onClose }: {
+  prefillCode?: string
   onPaired: (s: Screen) => void
   onClose: () => void
 }) {
   const { user } = useAuth()
   const t = useCmsT()
-  const [code, setCode] = useState('')
+  const [code, setCode] = useState(prefillCode)
   const [name, setName] = useState('')
   const [orientation, setOrientation] = useState<'landscape' | 'portrait'>('landscape')
   const [error, setError] = useState<string | null>(null)
