@@ -23,6 +23,7 @@ function getOrCreateHardwareId(): string {
 type State = 'pairing' | 'playing'
 
 export default function DisplayEntry() {
+  const previewId = new URLSearchParams(window.location.search).get('preview')
   const [hardwareId] = useState(() => getOrCreateHardwareId())
   // Starte direkt mit 'pairing' — kein Netzwerk-abhängiger Loading-State
   const [state, setState] = useState<State>('pairing')
@@ -64,6 +65,8 @@ export default function DisplayEntry() {
 
     return () => { supabase.removeChannel(channel) }
   }, [hardwareId])
+
+  if (previewId) return <ScreenPlayer screenId={previewId} preview />
 
   if (state === 'pairing') {
     return <PairingScreen hardwareId={hardwareId} onPaired={() => setState('playing')} />

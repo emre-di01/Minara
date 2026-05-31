@@ -14,6 +14,8 @@ stop_hotspot() {
     log "Stopping hotspot..."
     systemctl stop hostapd dnsmasq 2>/dev/null || true
     ip addr flush dev "$IFACE" 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i "$IFACE" -p tcp --dport 80  -j REDIRECT --to-port 8080 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i "$IFACE" -p tcp --dport 443 -j REDIRECT --to-port 8080 2>/dev/null || true
     rm -f "$AP_FLAG"
 }
 
@@ -48,6 +50,13 @@ EOF
     systemctl stop dnsmasq 2>/dev/null || true
     hostapd /tmp/hostapd.conf -B -P /tmp/hostapd.pid 2>/dev/null
     dnsmasq --conf-file=/tmp/dnsmasq-ap.conf --pid-file=/tmp/dnsmasq-ap.pid 2>/dev/null
+
+    # Captive-Portal: HTTP + HTTPS → Port 8080 umleiten
+    # Android/iOS/Windows prüfen bestimmte URLs → Redirect löst Auto-Popup aus
+    iptables -t nat -D PREROUTING -i "$IFACE" -p tcp --dport 80  -j REDIRECT --to-port 8080 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i "$IFACE" -p tcp --dport 443 -j REDIRECT --to-port 8080 2>/dev/null || true
+    iptables -t nat -A PREROUTING -i "$IFACE" -p tcp --dport 80  -j REDIRECT --to-port 8080
+    iptables -t nat -A PREROUTING -i "$IFACE" -p tcp --dport 443 -j REDIRECT --to-port 8080
 
     touch "$AP_FLAG"
     log "Hotspot active: $AP_SSID — Portal: http://192.168.4.1:8080"

@@ -322,10 +322,11 @@ function RssSlide({ url, layout, lang = 'de' }: { url: string; layout: string; l
       try {
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 8000)
-        const r = await fetch(
-          `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`,
-          { signal: controller.signal }
-        )
+        const proxyUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/rss-proxy?url=${encodeURIComponent(url)}`
+        const r = await fetch(proxyUrl, {
+          signal: controller.signal,
+          headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+        })
         clearTimeout(timeout)
         const d = await r.json()
         if (d.status === 'ok' && active) {

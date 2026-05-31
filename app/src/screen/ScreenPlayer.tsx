@@ -22,12 +22,14 @@ document.addEventListener('touchstart', unlockAudio, { capture: true, passive: t
 document.addEventListener('keydown',    unlockAudio, { capture: true, passive: true, once: true })
 
 interface Props {
-  hardwareId: string
+  hardwareId?: string
+  screenId?: string  // Preview-Modus: direkt per DB-ID laden
+  preview?: boolean  // Preview-Modus: kein Heartbeat, kein Ezan
 }
 
 const AZAN_PRAYERS: AzanPrayer[] = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
 
-export default function ScreenPlayer({ hardwareId }: Props) {
+export default function ScreenPlayer({ hardwareId, screenId, preview = false }: Props) {
   const [screen, setScreen] = useState<Screen | null>(null)
   const [playlist, setPlaylist] = useState<Playlist | null>(null)
   const [profile, setProfile] = useState<MosqueProfile | null>(null)
@@ -42,18 +44,21 @@ export default function ScreenPlayer({ hardwareId }: Props) {
 
   // Cache speichern sobald screen + playlist aus Online-Quelle vollständig sind
   useEffect(() => {
-    if (!loadedOnlineRef.current || !screen || !playlist) return
+    if (!loadedOnlineRef.current || !screen || !playlist || !hardwareId || preview) return
     saveScreenConfig(hardwareId, { screen, playlist, profile })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen?.id, playlist?.id, profile?.user_id])
 
   useEffect(() => {
     async function load() {
-      // 3-Sekunden-Timeout: bei Supabase-Fehler oder Netz-Ausfall sofort auf Cache zurückfallen
       let screenData: Screen | null = null
       try {
+        const query = screenId
+          ? supabase.from('screens').select('*').eq('id', screenId).single()
+          : supabase.from('screens').select('*').eq('hardware_id', hardwareId!).single()
+
         const result = await Promise.race([
-          supabase.from('screens').select('*').eq('hardware_id', hardwareId).single(),
+          query,
           new Promise<{ data: null }>((resolve) =>
             setTimeout(() => resolve({ data: null }), 3000)
           ),
@@ -62,8 +67,8 @@ export default function ScreenPlayer({ hardwareId }: Props) {
       } catch { /* Netzwerkfehler */ }
 
       if (!screenData) {
-        // Offline-Fallback: letzten bekannten Zustand aus IndexedDB laden
-        const cached = await loadScreenConfig(hardwareId)
+        if (preview) return  // Preview ohne Cache-Fallback
+        const cached = await loadScreenConfig(hardwareId!)
         if (cached) {
           setScreen(cached.screen)
           setProfile(cached.profile)
@@ -89,8 +94,10 @@ export default function ScreenPlayer({ hardwareId }: Props) {
 
     load()
 
+    if (preview) return  // kein Heartbeat im Preview-Modus
+
     function beat() {
-      supabase.from('screens').update({ last_seen_at: new Date().toISOString() }).eq('hardware_id', hardwareId).then(() => {})
+      supabase.from('screens').update({ last_seen_at: new Date().toISOString() }).eq('hardware_id', hardwareId!).then(() => {})
     }
     beat()
     const heartbeat = setInterval(beat, 30_000)
@@ -187,7 +194,6 @@ export default function ScreenPlayer({ hardwareId }: Props) {
   }
 
   if (!playlist) {
-    // playlist_id ist gesetzt aber Fetch läuft noch → Spinner statt NoPlaylistScreen
     if (screen.playlist_id || playlistIdRef.current) {
       return (
         <div className="h-screen w-screen bg-gray-950 flex items-center justify-center">
@@ -195,10 +201,9 @@ export default function ScreenPlayer({ hardwareId }: Props) {
         </div>
       )
     }
-    return <NoPlaylistScreen hardwareId={hardwareId} />
+    return <NoPlaylistScreen hardwareId={hardwareId ?? screen.hardware_id} />
   }
 
-  // Build effective prayer source: screen override → profile source → profile legacy city_id
   const profileSource = profile?.prayer_source ?? null
   const profileCityId = profileSource?.source === 'diyanet' ? profileSource.cityId : (profile?.city_id ?? null)
   const effectiveCityId = screen.city_id ?? profileCityId ?? 0
@@ -211,6 +216,7 @@ export default function ScreenPlayer({ hardwareId }: Props) {
       profile={profile}
       cityId={effectiveCityId}
       prayerSource={effectivePrayerSource}
+      preview={preview}
     />
   )
 }
@@ -218,15 +224,16 @@ export default function ScreenPlayer({ hardwareId }: Props) {
 // ── ScreenContent: SlidePlayer + Ezan-Trigger ────────────────────────────────
 
 function ScreenContent({
-  screen, playlist, profile, cityId, prayerSource,
+  screen, playlist, profile, cityId, prayerSource, preview = false,
 }: {
   screen: Screen
   playlist: Playlist
   profile: MosqueProfile | null
   cityId: number
   prayerSource: PrayerSource | null
+  preview?: boolean
 }) {
-  const azanConfig = screen.azan_config ?? null
+  const azanConfig = preview ? null : (screen.azan_config ?? null)
   const [prayerTimes, setPrayerTimes] = useState<PrayerTimes | null>(null)
   const [activeAzan, setActiveAzan] = useState<AzanPrayer | null>(() => {
     const p = new URLSearchParams(window.location.search).get('test_azan')

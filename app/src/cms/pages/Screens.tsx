@@ -227,6 +227,13 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
             {isOnline ? t.sc.online : t.sc.offline}
           </span>
           <button
+            onClick={() => window.open(`/tv?preview=${screen.id}`, '_blank', 'width=1280,height=720,noopener')}
+            title="Live-Vorschau"
+            className="text-sm p-0.5 text-gray-600 hover:text-blue-400 transition"
+          >
+            👁
+          </button>
+          <button
             onClick={() => setShowRemote(v => !v)}
             title="Remote-Befehle"
             className={`text-sm p-0.5 transition ${showRemote ? 'text-emerald-400' : 'text-gray-600 hover:text-gray-400'}`}
