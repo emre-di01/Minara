@@ -1,7 +1,6 @@
 [Unit]
 Description=Minara Remote Command Executor
-After=network-online.target
-Wants=network-online.target
+After=wifi-setup.service
 
 [Service]
 Type=simple

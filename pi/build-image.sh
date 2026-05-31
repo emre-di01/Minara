@@ -251,13 +251,10 @@ mkdir -p /run/user/1001
 chown kiosk:kiosk /run/user/1001
 chmod 700 /run/user/1001
 
-# Auto-Login
-mkdir -p /etc/systemd/system/getty@tty1.service.d/
-cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << 'EOF'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin kiosk --noclear %I $TERM
-EOF
+# mosque-kiosk.service nutzt PAMName=login auf tty1 — kein getty-Autologin,
+# da zwei logind-Sessions auf derselben TTY cage/DRM blockieren würden.
+# tty1 bleibt für den Service reserviert.
+systemctl mask getty@tty1.service 2>/dev/null || true
 
 # Services aktivieren
 systemctl disable hostapd dnsmasq 2>/dev/null || true

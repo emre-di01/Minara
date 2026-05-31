@@ -1,7 +1,6 @@
 [Unit]
 Description=Mosque WiFi Watchdog
-After=wifi-setup.service network-online.target
-Wants=network-online.target
+After=wifi-setup.service
 
 [Service]
 Type=simple

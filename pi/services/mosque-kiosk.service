@@ -1,8 +1,5 @@
 [Unit]
 Description=Minara Kiosk (Pi 4 Wayland)
-After=network-online.target
-Wants=network-online.target
-# Neustart wenn Netzwerk wegbricht und wiederkommt
 After=wifi-setup.service
 
 [Service]
@@ -20,16 +17,13 @@ Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus
 ExecStartPre=/bin/sleep 3
 ExecStart=/opt/mosque/scripts/start-kiosk.sh
 
-# Neustart bei jedem Exit (Absturz, kill, etc.)
 Restart=always
 RestartSec=5
 
-# Verhindert endlose Restart-Schleife bei kaputtem System
-StartLimitIntervalSec=120
-StartLimitBurst=5
+# start-kiosk.sh zählt Abstürze selbst und rebootet bei CRASH_LIMIT=10
+# kein StartLimitBurst hier — der würde den Script-internen Reboot verhindern
+StartLimitIntervalSec=0
 
-# Systemd-Watchdog: wenn Prozess 2 Min nicht antwortet → kill + restart
-# (start-kiosk.sh selbst überwacht Chromium-Abstürze, dieser fängt Hänger)
 TimeoutStartSec=60
 TimeoutStopSec=15
 

@@ -270,15 +270,12 @@ grep -q "mosque-screen" /etc/hosts || echo "127.0.1.1 mosque-screen" >> /etc/hos
 systemctl enable avahi-daemon 2>/dev/null || true
 log "Hostname: mosque-screen (mosque-screen.local)"
 
-# ── 8. Auto-Login auf tty1 ───────────────────────────────────────────────────
-section "Auto-Login"
-mkdir -p /etc/systemd/system/getty@tty1.service.d/
-cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << EOF
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin $KIOSK_USER --noclear %I \$TERM
-EOF
-log "Auto-Login für '$KIOSK_USER' auf tty1"
+# ── 8. Getty auf tty1 maskieren ──────────────────────────────────────────────
+section "Getty tty1 maskieren"
+# mosque-kiosk.service nutzt PAMName=login — autologin würde zweite
+# logind-Session auf tty1 erstellen und cage/DRM blockieren
+systemctl mask getty@tty1.service 2>/dev/null || true
+log "getty@tty1 maskiert (mosque-kiosk.service übernimmt TTY1 via PAMName=login)"
 
 # ── 9. Systemd-Lingering (XDG_RUNTIME_DIR beim Boot) ─────────────────────────
 loginctl enable-linger "$KIOSK_USER" 2>/dev/null || true
