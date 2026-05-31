@@ -227,7 +227,11 @@ function ScreenCard({ screen, playlists, onAssign, onCityAssign, onScheduleSave,
             {isOnline ? t.sc.online : t.sc.offline}
           </span>
           <button
-            onClick={() => window.open(`/tv?preview=${screen.id}`, '_blank', 'width=1280,height=720,noopener')}
+            onClick={() => {
+              const portrait = screen.orientation === 'portrait'
+              window.open(`/tv?preview=${screen.id}`, '_blank',
+                `width=${portrait ? 450 : 1280},height=${portrait ? 800 : 720},noopener`)
+            }}
             title="Live-Vorschau"
             className="text-sm p-0.5 text-gray-600 hover:text-blue-400 transition"
           >
