@@ -15,6 +15,12 @@ log "WiFi-Watchdog gestartet"
 while true; do
     sleep $CHECK_INTERVAL
 
+    # Hotspot aktiv? Dann kein Reconnect — fehlender Ping ist kein Fehler
+    if [ -f /tmp/hotspot_active ]; then
+        FAIL_COUNT=0
+        continue
+    fi
+
     # Prüfen ob überhaupt eine WLAN-Verbindung besteht
     if ! ip link show wlan0 &>/dev/null; then
         log "wlan0 nicht gefunden — überspringe"
