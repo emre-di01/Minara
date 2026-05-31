@@ -32,6 +32,7 @@ const AZAN_PRAYERS: AzanPrayer[] = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
 export default function ScreenPlayer({ hardwareId, screenId, preview = false }: Props) {
   const [screen, setScreen] = useState<Screen | null>(null)
   const [playlist, setPlaylist] = useState<Playlist | null>(null)
+  const [playlistMissing, setPlaylistMissing] = useState(false)
   const [profile, setProfile] = useState<MosqueProfile | null>(null)
   const playlistIdRef = React.useRef<string | null>(null)
   // Merkt ob aktuelle Daten aus Online-Quelle stammen (für Cache-Speicherung)
@@ -39,7 +40,8 @@ export default function ScreenPlayer({ hardwareId, screenId, preview = false }: 
 
   async function fetchPlaylist(playlistId: string) {
     const { data } = await supabase.from('playlists').select('*').eq('id', playlistId).single()
-    if (data) setPlaylist(data as Playlist)
+    if (data) { setPlaylist(data as Playlist); setPlaylistMissing(false) }
+    else setPlaylistMissing(true)
   }
 
   // Cache speichern sobald screen + playlist aus Online-Quelle vollständig sind
@@ -194,7 +196,7 @@ export default function ScreenPlayer({ hardwareId, screenId, preview = false }: 
   }
 
   if (!playlist) {
-    if (screen.playlist_id || playlistIdRef.current) {
+    if ((screen.playlist_id || playlistIdRef.current) && !playlistMissing) {
       return (
         <div className="h-screen w-screen bg-gray-950 flex items-center justify-center">
           <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
